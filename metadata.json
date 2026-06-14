@@ -1,0 +1,6 @@
+{
+  "name": "RouterOS Agent Manager",
+  "description": "Create and manage AI agents for MikroTik RouterOS devices using OpenClaw protocol.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
