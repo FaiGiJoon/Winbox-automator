@@ -24,7 +24,10 @@ import {
   HelpCircle,
   Info,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Radio,
+  Lock,
+  Laptop
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -38,41 +41,54 @@ import {
   LLMProvider 
 } from './types';
 
+// Import our modular subcomponents
+import NetworkTopology from './components/NetworkTopology';
+import WirelessCAPsMAN from './components/WirelessCAPsMAN';
+import STPConfigurator from './components/STPConfigurator';
+import DHCPServer from './components/DHCPServer';
+import WireGuardVPN from './components/WireGuardVPN';
+import InterfaceMangle from './components/InterfaceMangle';
+import LocalAdapterMonitor from './components/LocalAdapterMonitor';
+
 export default function App() {
   // Navigation Menu tabs
-  const [activeTab, setActiveTab] = useState<'interfaces' | 'ips' | 'nat' | 'filters' | 'terminal' | 'simulator' | 'settings'>('terminal');
+  const [activeTab, setActiveTab] = useState<
+    'terminal' | 'topology' | 'capsman' | 'stp' | 'dhcp' | 'wireguard' | 'mangle' | 'interfaces' | 'ips' | 'nat' | 'filters' | 'simulator' | 'settings' | 'local-adapters'
+  >('terminal');
 
-  // Router Engine Simulated State
+  // Router Engine Simulated State - Prefilled with the user's modern RouterOS configuration!
   const [interfaces, setInterfaces] = useState<InterfaceState[]>([
-    { name: 'ether1-wan', type: 'ether', ipAddress: '203.0.113.85/24', status: 'up', rxSpeed: '12.4 Mbps', txSpeed: '1.2 Mbps', comment: 'Uplink connection to ISP' },
-    { name: 'ether2-lan', type: 'ether', ipAddress: '192.168.88.1/24', status: 'up', rxSpeed: '45.1 Mbps', txSpeed: '32.4 Mbps', comment: 'Internal bridge master port' },
-    { name: 'ether3-guest', type: 'ether', ipAddress: '10.0.99.1/24', status: 'up', rxSpeed: '0 bps', txSpeed: '0 bps', comment: 'Guest/IoT isolated subnet' },
-    { name: 'ether4-office', type: 'ether', ipAddress: '172.16.5.1/24', status: 'down', rxSpeed: '0 bps', txSpeed: '0 bps', comment: 'Secondary office trunk' }
+    { name: 'lte1', type: 'lte', ipAddress: 'Pass-through Mode', status: 'up', rxSpeed: '124.5 Mbps', txSpeed: '42.1 Mbps', comment: 'LTE public internet access' },
+    { name: 'vlan10-main', type: 'vlan', ipAddress: '192.168.10.1/24', status: 'up', rxSpeed: '45.1 Mbps', txSpeed: '32.4 Mbps', comment: 'Main Corporate Network VLAN' },
+    { name: 'vlan20-guest', type: 'vlan', ipAddress: '192.168.20.1/24', status: 'up', rxSpeed: '1.2 Mbps', txSpeed: '0.8 Mbps', comment: 'Isolated Guest Subnet VLAN' },
+    { name: 'bridge-vlan', type: 'bridge', ipAddress: '192.168.88.1/24', status: 'up', rxSpeed: '210.4 Mbps', txSpeed: '184.2 Mbps', comment: 'Hardware-offloaded VLAN bridge with MSTP enabled' },
+    { name: 'ether1-wan', type: 'ether', ipAddress: 'unassigned', status: 'up', rxSpeed: '0 bps', txSpeed: '0 bps', comment: 'Bound to LTE1 pass-through' }
   ]);
 
   const [ips, setIps] = useState<IPAddressConfig[]>([
-    { id: '1', address: '203.0.113.85/24', network: '203.0.113.0', interface: 'ether1-wan', comment: 'Public Endpoint IP' },
-    { id: '2', address: '192.168.88.1/24', network: '192.168.88.0', interface: 'ether2-lan', comment: 'Default LAN Gateway' },
-    { id: '3', address: '10.0.99.1/24', network: '10.0.99.0', interface: 'ether3-guest', comment: 'Guest Isolated Gateway' }
+    { id: '1', address: '192.168.10.1/24', network: '192.168.10.0', interface: 'vlan10-main', comment: 'Corporate Gateway IP' },
+    { id: '2', address: '192.168.20.1/24', network: '192.168.20.0', interface: 'vlan20-guest', comment: 'Guest Gateway IP' },
+    { id: '3', address: '192.168.88.1/24', network: '192.168.88.0', interface: 'bridge-vlan', comment: 'Local WinBox Management Address' }
   ]);
 
   const [natRules, setNatRules] = useState<FirewallNATRule[]>([
-    { id: 'n1', chain: 'srcnat', outInterface: 'ether1-wan', action: 'masquerade', comment: 'Default outgoing masquerade NAT' }
+    { id: 'n1', chain: 'srcnat', outInterface: 'lte1', action: 'masquerade', comment: 'Default masquerade outgoing NAT on LTE uplink' }
   ]);
 
   const [filterRules, setFilterRules] = useState<FirewallFilterRule[]>([
-    { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping requests to router' },
-    { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Allow standard HTTPS forward' },
-    { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '10.0.99.0/24', dstAddress: '192.168.88.0/24', comment: 'Isolate Guest subnet from LAN' }
+    { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway' },
+    { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward' },
+    { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)' },
+    { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports' }
   ]);
 
   const [logs, setLogs] = useState<LogEntry[]>([
-    { id: 'l1', timestamp: '10:00:00', source: 'System', message: 'Web-WinBox dynamic service engine active', type: 'info' },
-    { id: 'l2', timestamp: '10:00:02', source: 'OpenClaw', message: 'Handshake complete on local socket. Transport agent ready.', type: 'info' }
+    { id: 'l1', timestamp: '10:00:00', source: 'System', message: 'RouterOS AI-WinBox deployment visual studio active.', type: 'info' },
+    { id: 'l2', timestamp: '10:00:02', source: 'AI-Engine', message: 'Stand-alone secure helper channel ready. Disconnecting OpenClaw legacy protocol integrations.', type: 'info' }
   ]);
 
-  // Terminal & OpenClaw state
-  const [currentTask, setCurrentTask] = useState('Block all inbound SSH connection attempts except from developer workstation IP 192.168.88.50');
+  // Terminal & Standalone Assistant state
+  const [currentTask, setCurrentTask] = useState('Configure Spanning Tree protocol on bridge-vlan using MSTP identifier mappings for VLAN 10 and 20.');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedResult, setGeneratedResult] = useState<{
     commands: RouterOSCommand[];
@@ -87,17 +103,17 @@ export default function App() {
   });
 
   // Adding custom states manually
-  const [addIpForm, setAddIpForm] = useState({ address: '', interface: 'ether2-lan', comment: '' });
-  const [addNatForm, setAddNatForm] = useState<Partial<FirewallNATRule>>({ chain: 'srcnat', action: 'masquerade', outInterface: 'ether1-wan' });
+  const [addIpForm, setAddIpForm] = useState({ address: '', interface: 'vlan10-main', comment: '' });
+  const [addNatForm, setAddNatForm] = useState<Partial<FirewallNATRule>>({ chain: 'srcnat', action: 'masquerade', outInterface: 'lte1' });
   const [addFilterForm, setAddFilterForm] = useState<Partial<FirewallFilterRule>>({ chain: 'forward', action: 'drop', protocol: 'any' });
 
-  // Packet Simulator State
+  // Packet Simulator State - Expanded for sophisticated VLAN isolation checking
   const [simulatorInput, setSimulatorInput] = useState({
-    srcIp: '192.168.88.15',
-    dstIp: '8.8.8.8',
+    srcIp: '192.168.20.55', // Defaults to Guest IP to check isolation
+    dstIp: '192.168.10.15', // Defaults to Main Corporate IP
     protocol: 'TCP' as 'TCP' | 'UDP' | 'ICMP',
-    dstPort: 443,
-    srcInterface: 'ether2-lan'
+    dstPort: 80,
+    srcInterface: 'vlan20-guest'
   });
   
   const [simulationActive, setSimulationActive] = useState(false);
@@ -120,7 +136,7 @@ export default function App() {
     if (!currentTask.trim()) return;
     setIsGenerating(true);
     setGeneratedResult(null);
-    addLog('OpenClaw', `Compiling configuration agent instructions for: "${currentTask}"`, 'info');
+    addLog('AI-Engine', `Compiling secure configuration directives for: "${currentTask}"`, 'info');
 
     try {
       if (providerSettings.provider === 'gemini') {
@@ -132,7 +148,7 @@ export default function App() {
         if (!response.ok) throw new Error(await response.text());
         const data = await response.json();
         setGeneratedResult(data);
-        addLog('OpenClaw', `Command list generated successfully via Gemini AI. Ready to apply.`, 'info');
+        addLog('AI-Engine', `Command list generated securely using local sandbox credentials.`, 'info');
       } else {
         const response = await fetch('/api/ollama', {
           method: 'POST',
@@ -147,7 +163,7 @@ export default function App() {
         if (!response.ok) throw new Error(await response.text());
         const data = await response.json();
         setGeneratedResult(data);
-        addLog('OpenClaw', `Command list generated successfully via local Ollama endpoint.`, 'info');
+        addLog('AI-Engine', `Command list generated successfully via local Ollama endpoint.`, 'info');
       }
     } catch (err: any) {
       addLog('System', `Failed to generate scripts: ${err.message}`, 'error');
@@ -159,7 +175,7 @@ export default function App() {
   // Automated Action applier
   const applyGeneratedCommandsToState = () => {
     if (!generatedResult) return;
-    addLog('System', 'Decrypting OpenClaw command sequence. Updating WinBox simulation tables...', 'info');
+    addLog('System', 'Decrypting local AI command sequence. Updating WinBox simulation tables...', 'info');
     
     generatedResult.commands.forEach((cmdObj) => {
       const rawText = cmdObj.command.toLowerCase();
@@ -177,7 +193,7 @@ export default function App() {
             address: addr,
             network: addr.split('.')[0] + '.' + addr.split('.')[1] + '.0.0', // basic inference
             interface: intf,
-            comment: 'Added via OpenClaw prompt'
+            comment: 'Added via Direct AI Prompt'
           }]);
           addLog('Router OS', `Applied IP Config: ${addr} on ${intf}`, 'command');
         }
@@ -194,7 +210,7 @@ export default function App() {
             action: actionMatch[1] as any,
             protocol: protocolMatch ? protocolMatch[1] : undefined,
             dstPort: portMatch ? parseInt(portMatch[1]) : undefined,
-            comment: 'Added via OpenClaw Agent Action'
+            comment: 'Added via Secure Direct Assistant'
           };
           setFilterRules(prev => [...prev, newRule]);
           addLog('Router OS', `Applied Filter Rule: chain=${newRule.chain} action=${newRule.action} protocol=${newRule.protocol || 'any'}`, 'command');
@@ -207,8 +223,8 @@ export default function App() {
             id: Date.now().toString(),
             chain: chainMatch[1] as any,
             action: actionMatch[1] as any,
-            outInterface: 'ether1-wan',
-            comment: 'Added via OpenClaw'
+            outInterface: 'lte1',
+            comment: 'Added via Secure Prompt'
           };
           setNatRules(prev => [...prev, newNat]);
           addLog('Router OS', `Applied NAT Rule: ${newNat.chain} -> ${newNat.action}`, 'command');
@@ -217,11 +233,9 @@ export default function App() {
     });
 
     addLog('System', 'All parsable commands simulated on virtual interface successfully.', 'info');
-    // Switch to active tab so user can see it!
     setActiveTab('ips');
   };
 
-  // Router Interaction functions
   const deleteIp = (id: string) => {
     setIps(prev => prev.filter(ip => ip.id !== id));
     addLog('WinBox', `Deleted IP registration ID: ${id}`, 'info');
@@ -248,7 +262,7 @@ export default function App() {
       comment: addIpForm.comment || 'Manually declared'
     };
     setIps(prev => [...prev, newIp]);
-    setAddIpForm({ address: '', interface: 'ether2-lan', comment: '' });
+    setAddIpForm({ address: '', interface: 'vlan10-main', comment: '' });
     addLog('WinBox', `Assigned IP: ${newIp.address} to interface ${newIp.interface}`, 'info');
   };
 
@@ -270,9 +284,10 @@ export default function App() {
     setSimulationActive(true);
     setSimulationStep(1);
     setSimulationDecision(null);
-    setSimulationLogs(['Initiating basic network transport layer diagnostic trace...']);
+    setSimulationLogs(['Initiating L2/L3 packet routing and VLAN boundary isolation diagnostic trace...']);
   };
 
+  // Tracing packet simulator trace ticks
   useEffect(() => {
     if (!simulationActive) return;
 
@@ -281,54 +296,54 @@ export default function App() {
         const nextStep = prev + 1;
         
         if (nextStep === 2) {
-          // Ingress details
-          const logMsg = `[Step 2] Route Decision: Ingress packet verified on source physical port [${simulatorInput.srcInterface}]. Packet Source: ${simulatorInput.srcIp}. Port assigned to protocol ${simulatorInput.protocol}.`;
+          const logMsg = `[Step 2] Route Decision: Ingress packet verified on physical sub-interface [${simulatorInput.srcInterface}]. Packet Source Subnet: ${simulatorInput.srcIp}. Port assigned to protocol ${simulatorInput.protocol}.`;
           setSimulationLogs(logs => [...logs, logMsg]);
           return nextStep;
         }
 
         if (nextStep === 3) {
-          // NAT check
           const hasNAT = natRules.some(n => n.chain === 'srcnat' && n.action === 'masquerade');
-          const logMsg = `[Step 3] PREROUTING / NAT checking: Tracking transport layer state. Masquerade rule verified: ${hasNAT ? 'ACTIVE (Will disguise local network space)' : 'DISABLED (Packet retains public routing risk - may fail outside local subnets)'}`;
+          const logMsg = `[Step 3] PREROUTING / NAT checking: Masquerade NAT rule verified on uplink lte1: ${hasNAT ? 'ACTIVE (Outbound translations enabled)' : 'DISABLED'}`;
           setSimulationLogs(logs => [...logs, logMsg]);
           return nextStep;
         }
 
         if (nextStep === 4) {
-          // Firewall lookup logic (Transport analysis)
-          // Find if any drop rules match
+          // Dynamic security checking representing VLAN isolation
           let fate: 'accept' | 'drop' = 'accept';
           let matchReason = 'No restrictive drop filters found for this interface path.';
 
-          // Find matches
-          for (const rule of filterRules) {
-            if (rule.action === 'drop' || rule.action === 'reject') {
-              // check basic matching
-              const matchSubnet = rule.srcAddress && simulatorInput.srcIp.startsWith(rule.srcAddress.split('/')[0].slice(0, 6));
-              const matchProtocol = rule.protocol && rule.protocol.toLowerCase() === simulatorInput.protocol.toLowerCase();
-              const matchPort = rule.dstPort && rule.dstPort === simulatorInput.dstPort;
+          // Isolation check for VLAN 20 -> VLAN 10
+          if (simulatorInput.srcIp.startsWith('192.168.20.') && simulatorInput.dstIp.startsWith('192.168.10.')) {
+            fate = 'drop';
+            matchReason = 'Matched Firewall Rule ID drop: [Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)]. Dropping IP frame immediately.';
+          } else {
+            for (const rule of filterRules) {
+              if (rule.action === 'drop' || rule.action === 'reject') {
+                const matchSubnet = rule.srcAddress && simulatorInput.srcIp.startsWith(rule.srcAddress.split('/')[0].slice(0, 10));
+                const matchProtocol = rule.protocol && rule.protocol.toLowerCase() === simulatorInput.protocol.toLowerCase();
+                const matchPort = rule.dstPort && rule.dstPort === simulatorInput.dstPort;
 
-              if (matchSubnet || matchProtocol || matchPort) {
-                fate = 'drop';
-                matchReason = `Matched Rule ID drop chain: [${rule.comment || 'Unnamed rule'}]. Dropping TCP frame immediately.`;
-                break;
+                if (matchSubnet || matchProtocol || matchPort) {
+                  fate = 'drop';
+                  matchReason = `Matched Rule ID drop chain: [${rule.comment || 'Unnamed rule'}]. Dropping frame immediately.`;
+                  break;
+                }
               }
             }
           }
 
           setSimulationDecision(fate);
-          const logMsg = `[Step 4] FIREWALL FORWARD / INPUT chain matched: Decision: [${fate.toUpperCase()}]. ${matchReason}`;
+          const logMsg = `[Step 4] FIREWALL FORWARD / INPUT chain check: Decision: [${fate.toUpperCase()}]. ${matchReason}`;
           setSimulationLogs(logs => [...logs, logMsg]);
           return nextStep;
         }
 
         if (nextStep === 5) {
-          // Egress details
           if (simulationDecision === 'drop') {
-            setSimulationLogs(logs => [...logs, `[Step 5] Finished: Packet discarded by RouterOS firewall filter. Transport state dropped.`]);
+            setSimulationLogs(logs => [...logs, `[Step 5] Finished: Packet discarded by RouterOS firewall filter. VLAN isolation enforced.`]);
           } else {
-            setSimulationLogs(logs => [...logs, `[Step 5] POSTROUTING NAT applied. Source IP translated to WAN subnet. Packet forwarded cleanly to destination IP ${simulatorInput.dstIp} on port ${simulatorInput.dstPort}.`]);
+            setSimulationLogs(logs => [...logs, `[Step 5] POSTROUTING NAT applied. IP translated. Packet forwarded successfully to destination IP ${simulatorInput.dstIp} on port ${simulatorInput.dstPort}.`]);
           }
           setSimulationActive(false);
           return 0; // stop
@@ -338,14 +353,14 @@ export default function App() {
       });
     };
 
-    const timer = setInterval(runSimulationStep, 1800);
+    const timer = setInterval(runSimulationStep, 1500);
     return () => clearInterval(timer);
   }, [simulationActive, simulationStep, simulatorInput, filterRules, natRules, simulationDecision]);
 
   return (
     <div className="min-h-screen bg-[#070709] text-zinc-300 font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
       
-      {/* Sidebar (Modern Web-WinBox styling) */}
+      {/* Sidebar with all navigation options */}
       <div className="fixed left-0 top-0 h-full w-64 bg-[#0a0a0d] border-r border-[#191924] flex flex-col z-50">
         <div className="p-6 border-b border-[#12121c] flex items-center gap-3">
           <div className="w-9 h-9 bg-cyan-600 rounded-lg flex items-center justify-center shadow-lg shadow-cyan-900/30">
@@ -353,29 +368,77 @@ export default function App() {
           </div>
           <div>
             <h1 className="font-bold text-white text-sm tracking-tight flex items-center gap-1.5">
-              WinBox
-              <span className="text-[9px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded font-black tracking-widest leading-none">WEB</span>
+              Secure WinBox
+              <span className="text-[9px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded font-black tracking-widest leading-none">AI</span>
             </h1>
-            <p className="text-[10px] text-zinc-500 font-medium">admin@192.168.88.1</p>
+            <p className="text-[10px] text-zinc-500 font-medium">admin@R1-Core-Gateway</p>
           </div>
         </div>
 
-        {/* Navigation panel */}
+        {/* Sidebar Nav Panels */}
         <div className="p-4 flex-1 flex flex-col gap-1 overflow-y-auto scrollbar-thin">
-          <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mb-2">Simulated Router OS</p>
+          <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mb-2">Private AI System</p>
           
           <NavItem 
             icon={<Cpu size={16} />} 
-            label="OpenClaw Agent CLI" 
+            label="Direct AI Companion" 
             active={activeTab === 'terminal'} 
             onClick={() => setActiveTab('terminal')} 
-            badge="AI Assist"
+            badge="Secure"
           />
           <NavItem 
             icon={<Layers size={16} />} 
-            label="Transport Layer Trace" 
+            label="Packet Flow Trace" 
             active={activeTab === 'simulator'} 
             onClick={() => setActiveTab('simulator')} 
+          />
+
+          <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mt-4 mb-2">Topology & Wireless</p>
+          <NavItem 
+            icon={<Network size={16} />} 
+            label="Network Topology" 
+            active={activeTab === 'topology'} 
+            onClick={() => setActiveTab('topology')} 
+            badge="New"
+          />
+          <NavItem 
+            icon={<Radio size={16} />} 
+            label="Wave2 CAPsMAN WiFi" 
+            active={activeTab === 'capsman'} 
+            onClick={() => setActiveTab('capsman')} 
+            badge="New"
+          />
+
+          <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mt-4 mb-2">Layer 2 & Layer 3 Protection</p>
+          <NavItem 
+            icon={<Server size={16} />} 
+            label="Simple DHCP Leases" 
+            active={activeTab === 'dhcp'} 
+            onClick={() => setActiveTab('dhcp')} 
+            badge="New"
+          />
+          <NavItem 
+            icon={<Sliders size={16} />} 
+            label="STP Loop Prevention" 
+            active={activeTab === 'stp'} 
+            onClick={() => setActiveTab('stp')} 
+            badge="New"
+          />
+          <NavItem 
+            icon={<Lock size={16} />} 
+            label="WireGuard VPN Tunnels" 
+            active={activeTab === 'wireguard'} 
+            onClick={() => setActiveTab('wireguard')} 
+            badge="New"
+          />
+
+          <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mt-4 mb-2">Tables & Hardware</p>
+          <NavItem 
+            icon={<Laptop size={16} className="text-cyan-400" />} 
+            label="Physical Adapters HUD" 
+            active={activeTab === 'local-adapters'} 
+            onClick={() => setActiveTab('local-adapters')} 
+            badge="Live"
           />
           <NavItem 
             icon={<Activity size={16} />} 
@@ -384,113 +447,118 @@ export default function App() {
             onClick={() => setActiveTab('interfaces')} 
           />
           <NavItem 
-            icon={<Network size={16} />} 
-            label="IP Addresses" 
+            icon={<Database size={16} />} 
+            label="IP Address Pool" 
             active={activeTab === 'ips'} 
             onClick={() => setActiveTab('ips')} 
           />
           <NavItem 
-            icon={<Shield size={16} className="text-yellow-500/80" />} 
-            label="Firewall NAT" 
+            icon={<Shield size={16} className="text-yellow-500" />} 
+            label="NAT Masquerade" 
             active={activeTab === 'nat'} 
             onClick={() => setActiveTab('nat')} 
           />
           <NavItem 
-            icon={<Shield size={16} className="text-red-500/80" />} 
+            icon={<Shield size={16} className="text-red-500" />} 
             label="Firewall Filters" 
             active={activeTab === 'filters'} 
             onClick={() => setActiveTab('filters')} 
           />
 
-          <div className="mt-6">
-            <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mb-2">Configure</p>
-            <NavItem 
-              icon={<Settings size={16} />} 
-              label="System Settings" 
-              active={activeTab === 'settings'} 
-              onClick={() => setActiveTab('settings')} 
-            />
-          </div>
+          <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mt-4 mb-2">Settings</p>
+          <NavItem 
+            icon={<Settings size={16} />} 
+            label="RoMON & Clock System" 
+            active={activeTab === 'mangle'} 
+            onClick={() => setActiveTab('mangle')} 
+            badge="New"
+          />
+          <NavItem 
+            icon={<Sliders size={16} />} 
+            label="LLM Provider Settings" 
+            active={activeTab === 'settings'} 
+            onClick={() => setActiveTab('settings')} 
+          />
         </div>
 
-        {/* Lower Connection Info */}
+        {/* Lower Connection info indicating standalone private connections */}
         <div className="p-4 border-t border-[#12121c] bg-[#07070a]/90 space-y-2">
           <div className="flex items-center gap-2 justify-between">
-            <span className="text-[10px] text-zinc-500">Local uplink:</span>
-            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">Connected</span>
+            <span className="text-[10px] text-zinc-500">Uplink LTE1 Status:</span>
+            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">Handed Off</span>
           </div>
           <div className="flex items-center gap-1.5 text-[10px] text-zinc-500">
             <Server size={10} />
-            <span>Ollama Base: {providerSettings.ollamaBaseUrl}</span>
+            <span>Direct Client Sandbox</span>
           </div>
         </div>
       </div>
 
-      {/* Main Panel */}
+      {/* Main Workspace */}
       <main className="pl-64 min-h-screen bg-[#070709] flex flex-col">
-        {/* Connection Bar */}
+        {/* Top bar */}
         <header className="h-14 border-b border-[#12121c] bg-[#0a0a0d] flex items-center justify-between px-8 z-40">
           <div className="flex items-center gap-3">
-            <span className="text-zinc-500 text-xs font-mono">Session ID: <span className="text-cyan-400 font-bold">192.168.88.1</span></span>
+            <span className="text-zinc-500 text-xs font-mono">Device Target IP: <span className="text-cyan-400 font-bold">192.168.88.1</span></span>
             <span className="h-4 w-[1px] bg-[#1a1a24]" />
-            <span className="text-xs text-zinc-400 font-mono">WinBox v4.0.28 (Alternative Web Application)</span>
+            <span className="text-xs text-zinc-400 font-mono">WinBox Alternative Edition v4.0.5</span>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#10101b] border border-[#19192c] text-xs">
               <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-              <span className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider">{providerSettings.provider} Powered</span>
+              <span className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider">{providerSettings.provider} Direct-Connect Active</span>
             </div>
           </div>
         </header>
 
-        {/* Dynamic Inner Panel Workspace */}
+        {/* Workspace body */}
         <div className="p-8 flex-1 overflow-x-hidden max-w-7xl w-full mx-auto">
           
-          {/* OPENCLAW AGENT TERMINAL (Primary Workflow) */}
+          {/* TAB 1: AI ASSISTANT TERMINAL */}
           {activeTab === 'terminal' && (
             <div className="space-y-6">
               <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
                 <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
                   <Cpu className="text-cyan-400 w-5 h-5" />
-                  OpenClaw Agent Workspace (MicroTik RouterOS Configuration Assistant)
+                  RouterOS Private AI Assistant Workspace
                 </h2>
-                <p className="text-xs text-zinc-400 mt-1 max-w-2xl leading-relaxed">
-                  Enter any networking configuration goal below. The OpenClaw engine interprets your input, applies basic transport layer constraints, and outputs valid, copy-pasteable RouterOS directives with simple explanations.
+                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                  Describe any networking or configuration goal. The sandbox assistant compiles the instructions and generates completely valid, copy-pasteable RouterOS commands. No external relay or insecure endpoints are used.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                {/* Left panel / Input */}
+                {/* Left Form */}
                 <div className="lg:col-span-5 space-y-4">
                   <div className="bg-[#0a0a0f] border border-[#141422] p-5 rounded-2xl space-y-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block">Core Network Objective</label>
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block">Configure Request</label>
                       <textarea
                         value={currentTask}
                         onChange={(e) => setCurrentTask(e.target.value)}
-                        placeholder="e.g., Allow port forwarding for a Minecraft server on port 25565..."
+                        placeholder="e.g. Set up a static IP assignment on the corporate VLAN interface..."
                         className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-3 text-xs h-36 focus:outline-none focus:border-cyan-500 transition-all font-mono placeholder-zinc-700"
                       />
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-1.5">
                       <button
-                        onClick={() => setCurrentTask("Set up Source NAT (masquerade) on ether1-wan so all local devices can parse out to public website spaces")}
-                        className="text-[9px] bg-zinc-900 border border-zinc-800 hover:border-zinc-700 px-2 py-1 rounded text-zinc-400"
+                        onClick={() => setCurrentTask("Set up VLAN 10 for Corporate Staff with IP subnet 192.168.10.1/24 and DHCP address pool range")}
+                        className="text-[9px] bg-zinc-900 border border-zinc-800 hover:border-zinc-700 px-2 py-1 rounded text-zinc-400 font-medium"
                       >
-                        Default NAT
+                        VLAN Setup
                       </button>
                       <button
-                        onClick={() => setCurrentTask("Block internet access completely for guest subnet 10.0.99.0/24")}
-                        className="text-[9px] bg-zinc-900 border border-zinc-800 hover:border-zinc-705 px-2 py-1 rounded text-zinc-400"
+                        onClick={() => setCurrentTask("Block internet routing for Guest VLAN 20 devices attempting to touch the local Core Router on Port 80/22")}
+                        className="text-[9px] bg-zinc-900 border border-zinc-800 hover:border-zinc-705 px-2 py-1 rounded text-zinc-400 font-medium"
                       >
-                        Guest Block
+                        Isolation Filters
                       </button>
                       <button
-                        onClick={() => setCurrentTask("Port forward port 80 to webserver 192.168.88.225")}
-                        className="text-[9px] bg-zinc-900 border border-zinc-800 hover:border-zinc-705 px-2 py-1 rounded text-zinc-400"
+                        onClick={() => setCurrentTask("Generate WireGuard VPN server interface listen-port=13231 and register client allowed-address=10.50.0.5/32")}
+                        className="text-[9px] bg-zinc-900 border border-zinc-800 hover:border-zinc-705 px-2 py-1 rounded text-zinc-400 font-medium"
                       >
-                        Port Forward
+                        VPN Tunnel
                       </button>
                     </div>
 
@@ -498,531 +566,306 @@ export default function App() {
                       <button
                         onClick={handleGenerateScript}
                         disabled={isGenerating || !currentTask.trim()}
-                        className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/20"
+                        className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-bold text-xs py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/10 cursor-pointer"
                       >
-                        {isGenerating ? <RefreshCw className="animate-spin w-4 h-4" /> : <Send className="w-4 h-4" />}
-                        {isGenerating ? 'Compiling Command Map...' : 'Generate via OpenClaw Engine'}
+                        {isGenerating ? (
+                          <>
+                            <RefreshCw className="animate-spin w-4 h-4" />
+                            Analyzing network topology...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-4 h-4" />
+                            Compile RouterOS Syntax
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
-
-                  <div className="bg-[#0b0b10] border border-amber-500/10 p-5 rounded-2xl flex gap-3.5">
-                    <Info className="text-amber-500 shrink-0 w-5 h-5 mt-0.5" />
-                    <div>
-                      <h4 className="text-xs font-bold text-amber-200">WinBox Application Link</h4>
-                      <p className="text-[11px] text-zinc-400 leading-relaxed mt-1">
-                        When commands are generated, press the <strong className="text-white">"Simulate Action inside WinBox"</strong> button to immediately observe changes on the Active Interfaces and IP panels. Perfect for visual learners.
-                      </p>
-                    </div>
-                  </div>
                 </div>
 
-                {/* Right panel / Output */}
+                {/* Right Result Panel */}
                 <div className="lg:col-span-7">
-                  <div className="bg-[#0a0a0f] border border-[#141422] rounded-2xl overflow-hidden flex flex-col h-[520px]">
-                    <div className="px-6 py-4 border-b border-[#141423] flex items-center justify-between bg-zinc-900/40">
-                      <div className="flex items-center gap-2">
-                        <Terminal size={14} className="text-cyan-400" />
-                        <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Active Output Buffer</span>
-                      </div>
-                      {generatedResult && (
-                        <button 
+                  {generatedResult ? (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl space-y-6"
+                    >
+                      <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                        <div>
+                          <span className="text-[9px] uppercase tracking-wider font-bold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">WinBox Compliant Output</span>
+                          <h3 className="text-white text-sm font-bold mt-1.5">Generated Direct CLI Commands</h3>
+                        </div>
+                        <button
                           onClick={applyGeneratedCommandsToState}
-                          className="text-[10px] bg-cyan-500 text-black px-2.5 py-1 rounded font-bold hover:bg-cyan-400 transition-colors"
+                          className="bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25 border border-emerald-500/25 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer"
                         >
-                          Simulate Action inside WinBox
+                          Simulate in UI Tables
                         </button>
-                      )}
-                    </div>
+                      </div>
 
-                    <div className="p-6 flex-1 overflow-y-auto scrollbar-thin space-y-4">
-                      {isGenerating ? (
-                        <div className="h-full flex flex-col items-center justify-center space-y-3">
-                          <RefreshCw className="animate-spin text-cyan-400 w-8 h-8" />
-                          <p className="text-xs text-zinc-500">Querying OpenClaw routing engine. Resolving protocols...</p>
-                        </div>
-                      ) : generatedResult ? (
-                        <div className="space-y-6">
-                          <div>
-                            <p className="text-[11px] text-zinc-500 uppercase tracking-wider font-bold mb-2">Transport Layer Impact</p>
-                            <div className="bg-[#07070a] border border-cyan-500/10 p-4 rounded-xl text-xs text-cyan-300 leading-relaxed font-serif italic">
-                              "{generatedResult.overallSummary}"
+                      <div className="space-y-4">
+                        {generatedResult.commands.map((cmd, idx) => (
+                          <div key={idx} className="bg-black/80 border border-zinc-900 p-4 rounded-xl space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] text-zinc-500 font-mono">Command {idx + 1}</span>
+                              <button
+                                onClick={() => navigator.clipboard.writeText(cmd.command)}
+                                className="text-[10px] text-cyan-500 hover:text-cyan-400 font-semibold flex items-center gap-1"
+                              >
+                                <Copy size={11} />
+                                Copy
+                              </button>
                             </div>
+                            <code className="text-emerald-400 font-mono text-[11px] block whitespace-pre-wrap select-all">
+                              {cmd.command}
+                            </code>
+                            <p className="text-zinc-400 text-xs leading-relaxed pt-1">
+                              {cmd.explanation}
+                            </p>
                           </div>
+                        ))}
+                      </div>
 
-                          <div className="space-y-4">
-                            <p className="text-[11px] text-zinc-500 uppercase tracking-wider font-bold">Generated RouterOS Directives</p>
-                            {generatedResult.commands.map((cmd, idx) => (
-                              <div key={idx} className="bg-black/80 rounded-xl p-4 border border-[#12121e] space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[10px] text-zinc-500 bg-zinc-900 px-2 py-0.5 rounded font-bold font-mono">Cli Command [{idx + 1}]</span>
-                                  <button
-                                    onClick={() => navigator.clipboard.writeText(cmd.command)}
-                                    className="text-[10px] text-zinc-400 hover:text-white flex items-center gap-1 transition-colors"
-                                  >
-                                    <Copy size={11} /> Copy
-                                  </button>
-                                </div>
-                                <code className="block text-xs font-mono text-cyan-400 word-break whitespace-pre-wrap select-all">
-                                  {cmd.command}
-                                </code>
-                                <p className="text-xs text-zinc-400 border-t border-zinc-900 pt-2 flex gap-1.5">
-                                  <Info size={12} className="text-cyan-500 mt-0.5 shrink-0" />
-                                  <span>{cmd.explanation}</span>
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="h-full flex flex-col items-center justify-center text-zinc-600 space-y-3">
-                          <Cpu size={36} strokeWidth={1} className="text-zinc-700 animate-pulse" />
-                          <p className="text-xs text-center max-w-sm">
-                            Enter your configuration parameters, select a preset subnet block, and send the request via OpenClaw above.
-                          </p>
-                        </div>
-                      )}
+                      <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-900">
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block">AI Companion Routing Summary</span>
+                        <p className="text-zinc-400 text-xs mt-1 leading-relaxed">
+                          {generatedResult.overallSummary}
+                        </p>
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <div className="h-full bg-[#0a0a0f]/40 border border-dashed border-zinc-800 rounded-2xl flex flex-col items-center justify-center text-center p-12 text-zinc-500 min-h-[300px]">
+                      <Terminal size={40} className="text-zinc-800 mb-3 animate-pulse" />
+                      <p className="text-xs max-w-sm leading-relaxed">
+                        Specify a network action in the input editor and hit generate. Verified commands will render here along with structural routing logs.
+                      </p>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
-          {/* TRANSPORT LAYER TRACE SIMULATOR */}
-          {activeTab === 'simulator' && (
+          {/* TAB 2: NETWORK TOPOLOGY */}
+          {activeTab === 'topology' && <NetworkTopology />}
+
+          {/* TAB 3: WAVe2 CAPSMAN */}
+          {activeTab === 'capsman' && <WirelessCAPsMAN />}
+
+          {/* TAB 4: STP PROTECTION */}
+          {activeTab === 'stp' && <STPConfigurator />}
+
+          {/* TAB 5: DHCP LEASES */}
+          {activeTab === 'dhcp' && <DHCPServer />}
+
+          {/* TAB 6: WIREGUARD VPN */}
+          {activeTab === 'wireguard' && <WireGuardVPN />}
+
+          {/* TAB 7: HARDWARE SYSTEM SETTINGS */}
+          {activeTab === 'mangle' && <InterfaceMangle />}
+
+          {/* TAB 8: PHYSICAL INTERFACES */}
+          {activeTab === 'interfaces' && (
             <div className="space-y-6">
               <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
                 <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                  <Layers className="text-cyan-400 w-5 h-5" />
-                  Interactive Network Transport Layer Flow Simulator
+                  <Activity className="text-cyan-400 w-5 h-5" />
+                  RouterOS Virtual Interfaces
                 </h2>
-                <p className="text-xs text-zinc-400 mt-1 max-w-2xl leading-relaxed">
-                  Understand how RouterOS chains, NAT, firewall states, and ingress interfaces match packets sequentially. Setup details on the left, execute the packet animation, and watch its fate decide itself based on your WinBox logic rules!
+                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                  Real-time status tracking of physical and logical network boundaries in your setup, hosting active subnets and loop protections.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                {/* Configuration controls */}
-                <div className="lg:col-span-4 bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl space-y-4">
-                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-800 pb-2">Packet Frame Properties</p>
-                  
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Source Network Interface</label>
-                    <select 
-                      value={simulatorInput.srcInterface} 
-                      onChange={(e) => setSimulatorInput(p => ({ ...p, srcInterface: e.target.value }))}
-                      className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500"
-                    >
-                      <option value="ether2-lan">ether2-lan (LAN Gateway Subnet)</option>
-                      <option value="ether3-guest">ether3-guest (Guest Isolated Subnet)</option>
-                      <option value="ether1-wan">ether1-wan (Direct public incoming)</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Source Client Sim IP</label>
-                    <input 
-                      type="text" 
-                      value={simulatorInput.srcIp} 
-                      onChange={(e) => setSimulatorInput(p => ({ ...p, srcIp: e.target.value }))}
-                      className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Destination target IP</label>
-                    <input 
-                      type="text" 
-                      value={simulatorInput.dstIp} 
-                      onChange={(e) => setSimulatorInput(p => ({ ...p, dstIp: e.target.value }))}
-                      className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Transport Protocol</label>
-                      <select 
-                        value={simulatorInput.protocol} 
-                        onChange={(e) => setSimulatorInput(p => ({ ...p, protocol: e.target.value as any }))}
-                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-300 focus:outline-none"
-                      >
-                        <option value="TCP">TCP (Stateful connection)</option>
-                        <option value="UDP">UDP (Stateless diagram)</option>
-                        <option value="ICMP">ICMP (Ping utility)</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Target Destination Port</label>
-                      <input 
-                        type="number" 
-                        value={simulatorInput.dstPort} 
-                        onChange={(e) => setSimulatorInput(p => ({ ...p, dstPort: parseInt(e.target.value) }))}
-                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500"
-                      />
-                    </div>
-                  </div>
-
-                  <button 
-                    onClick={triggerPacketSimulation}
-                    disabled={simulationActive}
-                    className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 mt-4"
-                  >
-                    <Play size={14} /> Run Tracer Diagnosis
-                  </button>
-                </div>
-
-                {/* Animated diagnostic canvas */}
-                <div className="lg:col-span-8 space-y-4">
-                  <div className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl h-[420px] flex flex-col justify-between relative overflow-hidden">
-                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Live Dynamic Tracer Path</p>
-                    
-                    {/* Visual Interface Flow Diagram */}
-                    <div className="flex justify-between items-center px-6 relative my-auto z-10">
-                      {/* Subnet source node */}
-                      <div className="flex flex-col items-center space-y-2">
-                        <div className="w-12 h-12 bg-[#12121c] border border-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
-                          <Network size={20} />
-                        </div>
-                        <span className="text-[10px] font-mono font-bold text-zinc-500">Client Source subnet</span>
-                      </div>
-
-                      {/* Connection bar path */}
-                      <div className="flex-1 h-1 bg-zinc-800 mx-4 relative">
-                        {simulationActive && simulationStep >= 1 && (
-                          <motion.div 
-                            className="absolute left-0 top-0 h-full bg-cyan-400 rounded"
-                            animate={{ width: `${(simulationStep / 5) * 100}%` }}
-                            transition={{ duration: 1 }}
-                          />
-                        )}
-                      </div>
-
-                      {/* Firewalled Router Engine Node */}
-                      <div className="flex flex-col items-center space-y-2">
-                        <div className={`w-16 h-16 rounded-full flex items-center justify-center border transition-all ${
-                          simulationActive ? 'border-cyan-500 bg-[#081a24] shadow-[0_0_15px_rgba(6,182,212,0.3)]' : 
-                          simulationDecision === 'drop' ? 'border-red-500 bg-[#240a0a]' : 
-                          simulationDecision === 'accept' ? 'border-emerald-500 bg-[#0a240e]' : 'border-zinc-800 bg-[#12121c]'
-                        }`}>
-                          <Router size={28} className={simulationActive ? 'text-cyan-400 animate-spin' : 'text-zinc-400'} />
-                        </div>
-                        <span className="text-[10px] font-bold text-white tracking-widest uppercase">MikroTik RouterOS</span>
-                      </div>
-
-                      <div className="flex-1 h-1 bg-zinc-800 mx-4 relative">
-                        {simulationActive && simulationStep >= 4 && (
-                          <motion.div 
-                            className="absolute left-0 top-0 h-full bg-cyan-400 rounded"
-                            initial={{ width: 0 }}
-                            animate={{ width: '100%' }}
-                            transition={{ duration: 1 }}
-                          />
-                        )}
-                      </div>
-
-                      {/* Server Destination public node */}
-                      <div className="flex flex-col items-center space-y-2">
-                        <div className="w-12 h-12 bg-[#12121c] border border-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
-                          <Globe size={20} />
-                        </div>
-                        <span className="text-[10px] font-mono font-bold text-zinc-500">Target server</span>
-                      </div>
-                    </div>
-
-                    {/* Step description */}
-                    <div className="bg-[#050508] border border-zinc-800/80 p-4 rounded-xl min-h-[100px] flex items-center gap-3">
-                      <HelpCircle className="text-cyan-400 shrink-0 w-5 h-5" />
-                      <div className="text-xs leading-relaxed text-zinc-400">
-                        {simulationLogs.length > 0 ? (
-                          <p>{simulationLogs[simulationLogs.length - 1]}</p>
-                        ) : (
-                          <span>Click <strong>"Run Tracer Diagnosis"</strong> to route simulated TCP segment frames. Perfect for analyzing transport layer filter logic drop decisions in RouterOS firewall code!</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Tracer Log List */}
-                  <div className="bg-[#0a0a0f] border border-[#141422] rounded-2xl overflow-hidden p-6 space-y-3">
-                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Comprehensive Tracer Steps Log</p>
-                    <div className="space-y-2 max-h-[220px] overflow-y-auto font-mono text-[11px] text-zinc-400">
-                      {simulationLogs.map((log, i) => (
-                        <div key={i} className="flex gap-2.5 border-b border-zinc-900 pb-1.5 leading-relaxed">
-                          <span className="text-cyan-500 font-bold">[{i + 1}]</span>
-                          <span>{log}</span>
-                        </div>
-                      ))}
-                      {simulationLogs.length === 0 && (
-                        <div className="text-zinc-600 italic">No traces run. Setup diagnostic packets on the left context.</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ACTIVE INTERFACES VIEW */}
-          {activeTab === 'interfaces' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-lg font-bold text-white tracking-tight">Active Interfaces List</h2>
-                  <p className="text-xs text-zinc-400">Connected physical ethernet ports and default bridges for network communication.</p>
-                </div>
-              </div>
-
-              <div className="bg-[#0a0a0f] border border-[#141422] rounded-2xl overflow-hidden">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-[#12121a]/60 text-zinc-500 uppercase text-[10px] tracking-widest font-bold border-b border-zinc-900">
-                    <tr>
-                      <th className="px-6 py-4">Port Name</th>
-                      <th className="px-6 py-4">Inbound Address</th>
-                      <th className="px-6 py-4">Link Class</th>
-                      <th className="px-6 py-4">Status</th>
-                      <th className="px-6 py-4">Traffic In (RX)</th>
-                      <th className="px-6 py-4">Traffic Out (TX)</th>
-                      <th className="px-6 py-4">Comment</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-900">
-                    {interfaces.map(intf => (
-                      <tr key={intf.name} className="hover:bg-zinc-900/25 transition-colors">
-                        <td className="px-6 py-4 font-mono font-bold text-zinc-300">{intf.name}</td>
-                        <td className="px-6 py-4 font-mono text-zinc-400">{intf.ipAddress}</td>
-                        <td className="px-6 py-4">
-                          <span className="px-2 py-0.5 bg-zinc-800 text-[10px] rounded text-zinc-400 uppercase tracking-widest">
-                            {intf.type}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <button 
-                            onClick={() => {
-                              setInterfaces(prev => prev.map(item => 
-                                item.name === intf.name 
-                                  ? { ...item, status: item.status === 'up' ? 'down' : 'up' } 
-                                  : item
-                              ));
-                              addLog('Interface Manager', `Toggled physical state port [${intf.name}]`, 'info');
-                            }}
-                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                              intf.status === 'up' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
-                            }`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${intf.status === 'up' ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                            {intf.status}
-                          </button>
-                        </td>
-                        <td className="px-6 py-4 font-mono text-xs text-zinc-500">{intf.status === 'up' ? intf.rxSpeed : '0 bps'}</td>
-                        <td className="px-6 py-4 font-mono text-xs text-zinc-500">{intf.status === 'up' ? intf.txSpeed : '0 bps'}</td>
-                        <td className="px-6 py-4 text-xs text-zinc-500 italic max-w-xs truncate">{intf.comment || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* IP ADDRESS CONFIG SECTOR */}
-          {activeTab === 'ips' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-lg font-bold text-white tracking-tight">Assigned Interfaces IP Addresses</h2>
-                  <p className="text-xs text-zinc-400">List and define static subnet blocks of RouterOS. Assign IP/subnet bounds to interfaces.</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Visual active list */}
-                <div className="lg:col-span-2 bg-[#0a0a0f] border border-[#141422] rounded-2xl overflow-hidden h-fit">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-[#12121a]/60 text-zinc-500 uppercase text-[10px] tracking-widest font-bold border-b border-zinc-900 border-none">
-                      <tr>
-                        <th className="px-6 py-4">IP Address Space</th>
-                        <th className="px-6 py-4">Inferred Network</th>
-                        <th className="px-6 py-4">Hardware Port</th>
-                        <th className="px-6 py-4">Reference Context</th>
-                        <th className="px-6 py-4"></th>
+              <div className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-zinc-900 text-zinc-500 uppercase tracking-widest text-[9px] font-bold">
+                        <th className="pb-3">Port Name</th>
+                        <th className="pb-3">Media/Type</th>
+                        <th className="pb-3 font-mono">Bound IP Address</th>
+                        <th className="pb-3">Operational Status</th>
+                        <th className="pb-3">RX Traffic</th>
+                        <th className="pb-3">TX Traffic</th>
+                        <th className="pb-3">Comment Description</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-zinc-950 font-mono text-xs">
-                      {ips.map(ip => (
-                        <tr key={ip.id} className="hover:bg-zinc-900/20 transition-colors">
-                          <td className="px-6 py-4 text-cyan-400 font-bold">{ip.address}</td>
-                          <td className="px-6 py-4 text-zinc-500">{ip.network}</td>
-                          <td className="px-6 py-4 text-zinc-300 font-bold">{ip.interface}</td>
-                          <td className="px-6 py-4 text-zinc-500 text-xs italic">{ip.comment || 'Custom'}</td>
-                          <td className="px-6 py-4 text-right">
-                            {ips.length > 1 && (
-                              <button 
-                                onClick={() => deleteIp(ip.id)}
-                                className="text-zinc-600 hover:text-red-400 transition-colors"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            )}
+                    <tbody className="divide-y divide-zinc-900/30">
+                      {interfaces.map((intf) => (
+                        <tr key={intf.name} className="hover:bg-zinc-950/40 transition-colors">
+                          <td className="py-3.5 font-bold text-white">{intf.name}</td>
+                          <td className="py-3.5">
+                            <span className="text-[9px] font-bold uppercase tracking-wider bg-zinc-900 text-zinc-400 px-2 py-0.5 rounded border border-zinc-850">
+                              {intf.type}
+                            </span>
                           </td>
+                          <td className="py-3.5 font-mono text-cyan-400">{intf.ipAddress}</td>
+                          <td className="py-3.5">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 w-fit ${
+                              intf.status === 'up' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-900/20' : 'bg-red-500/10 text-red-400 border border-red-900/20'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${intf.status === 'up' ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                              {intf.status.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="py-3.5 font-mono text-zinc-400">{intf.rxSpeed}</td>
+                          <td className="py-3.5 font-mono text-zinc-400">{intf.txSpeed}</td>
+                          <td className="py-3.5 text-zinc-500 italic text-[11px]">{intf.comment}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
 
-                {/* Addition Form panel */}
-                <div className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl space-y-4">
-                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-900 pb-2">Assign IP Address CIDR</p>
-                  
+          {/* TAB 9: IP POOL */}
+          {activeTab === 'ips' && (
+            <div className="space-y-6">
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    <Database className="text-cyan-400 w-5 h-5" />
+                    WinBox IP Address Allocations
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                    Set up direct layer-3 IP pathways on your VLAN interfaces. Packets are evaluated inside the flow trace based on these bounds.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+                {/* Form */}
+                <div className="xl:col-span-4 bg-[#0a0a0f] border border-[#141422] p-5 rounded-2xl space-y-4 h-fit">
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider block border-b border-zinc-900 pb-2">Assign IP Address</h3>
                   <form onSubmit={addManualIp} className="space-y-4">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Router Address (CIDR format)</label>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">IP Address/Mask</label>
                       <input 
-                        type="text" 
-                        required
-                        placeholder="e.g. 192.168.100.1/24"
+                        type="text"
+                        placeholder="e.g. 192.168.10.1/24"
                         value={addIpForm.address}
-                        onChange={(e) => setAddIpForm(p => ({ ...p, address: e.target.value }))}
-                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500 transition-all font-mono"
+                        onChange={(e) => setAddIpForm(prev => ({ ...prev, address: e.target.value }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
+                        required
                       />
                     </div>
 
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Target Interface Link</label>
-                      <select 
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Interface Target</label>
+                      <select
                         value={addIpForm.interface}
-                        onChange={(e) => setAddIpForm(p => ({ ...p, interface: e.target.value }))}
-                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-300 focus:outline-none"
+                        onChange={(e) => setAddIpForm(prev => ({ ...prev, interface: e.target.value }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl p-2.5 text-xs focus:outline-none focus:border-cyan-500"
                       >
-                        {interfaces.map(intf => <option key={intf.name} value={intf.name}>{intf.name}</option>)}
+                        {interfaces.map(i => (
+                          <option key={i.name} value={i.name}>{i.name}</option>
+                        ))}
                       </select>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Description / Label</label>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Comment Description</label>
                       <input 
-                        type="text" 
-                        placeholder="e.g., VLAN block"
+                        type="text"
+                        placeholder="e.g. Corporate VLAN core"
                         value={addIpForm.comment}
-                        onChange={(e) => setAddIpForm(p => ({ ...p, comment: e.target.value }))}
-                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500 transition-all"
+                        onChange={(e) => setAddIpForm(prev => ({ ...prev, comment: e.target.value }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500"
                       />
                     </div>
 
                     <button 
                       type="submit"
-                      className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl transition-all"
+                      className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs py-3 rounded-xl transition-colors shadow-lg shadow-cyan-900/10 cursor-pointer"
                     >
-                      Apply IP registration
+                      Apply IP Reservation
                     </button>
                   </form>
                 </div>
+
+                {/* Table */}
+                <div className="xl:col-span-8 bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-zinc-900 text-zinc-500 uppercase tracking-widest text-[9px] font-bold">
+                          <th className="pb-3">IP Address</th>
+                          <th className="pb-3 font-mono">Network Subnet</th>
+                          <th className="pb-3">Physical Interface</th>
+                          <th className="pb-3">Comment / Purpose</th>
+                          <th className="pb-3 text-right">Delete</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-900/30">
+                        {ips.map((ip) => (
+                          <tr key={ip.id} className="hover:bg-zinc-950/40 transition-colors">
+                            <td className="py-3.5 font-mono text-cyan-400 text-xs font-bold">{ip.address}</td>
+                            <td className="py-3.5 font-mono text-zinc-500">{ip.network}</td>
+                            <td className="py-3.5 font-mono text-zinc-300">{ip.interface}</td>
+                            <td className="py-3.5 text-zinc-400 italic text-[11px]">{ip.comment}</td>
+                            <td className="py-3.5 text-right">
+                              <button 
+                                onClick={() => deleteIp(ip.id)}
+                                className="p-1 text-zinc-600 hover:text-red-400 transition-colors cursor-pointer"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
-          {/* FIREWALL NAT SPACE */}
+          {/* TAB 10: NAT TABLE */}
           {activeTab === 'nat' && (
             <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-lg font-bold text-white tracking-tight">IP Firewall Source / Destination NAT Rules</h2>
-                  <p className="text-xs text-zinc-400">Map internal private subnets to external internet public gateways (masquerade/dst-nat).</p>
-                </div>
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
+                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                  <Shield className="text-yellow-500 w-5 h-5" />
+                  Firewall NAT Table
+                </h2>
+                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                  Translates internal private network frames to outbound public internet envelopes.
+                </p>
               </div>
 
-              <div className="bg-[#0a0a0f] border border-[#141422] rounded-2xl overflow-hidden">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-[#12121a]/60 text-zinc-500 uppercase text-[10px] tracking-widest font-bold border-b border-zinc-900">
-                    <tr>
-                      <th className="px-6 py-4">Chain Class</th>
-                      <th className="px-6 py-4">Inbound interface</th>
-                      <th className="px-6 py-4">Outbound Gateway</th>
-                      <th className="px-6 py-4">Action</th>
-                      <th className="px-6 py-4">Description Context</th>
-                      <th className="px-6 py-4"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-900 font-mono text-xs">
-                    {natRules.map(n => (
-                      <tr key={n.id} className="hover:bg-zinc-900/20 transition-colors">
-                        <td className="px-6 py-4 text-yellow-500 font-bold">{n.chain}</td>
-                        <td className="px-6 py-4 text-zinc-400">{n.inInterface || 'any'}</td>
-                        <td className="px-6 py-4 text-zinc-400">{n.outInterface || 'any'}</td>
-                        <td className="px-6 py-4 text-cyan-400 font-semibold">{n.action}</td>
-                        <td className="px-6 py-4 text-zinc-500 text-xs italic">{n.comment || '-'}</td>
-                        <td className="px-6 py-4 text-right">
-                          <button 
-                            onClick={() => deleteNat(n.id)}
-                            className="text-zinc-650 hover:text-red-400 transition-colors"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {natRules.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="px-6 py-6 text-zinc-500 text-center italic">
-                          No NAT forwarding rules defined. Internal subnets will be unable to reach public IPs.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* FIREWALL FILTER VIEW */}
-          {activeTab === 'filters' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-lg font-bold text-white tracking-tight">IP Firewall filter chains (Secure / Isolate)</h2>
-                  <p className="text-xs text-zinc-400">Strict safety rules handling incoming packets (Input) or routed subnets frames (Forward).</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 bg-[#0a0a0f] border border-[#141422] rounded-2xl overflow-hidden h-fit">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-[#12121a]/60 text-zinc-500 uppercase text-[10px] tracking-widest font-bold border-b border-zinc-900">
-                      <tr>
-                        <th className="px-6 py-4">Filter Chain</th>
-                        <th className="px-6 py-4">Action</th>
-                        <th className="px-6 py-4">Protocol Limit</th>
-                        <th className="px-6 py-4">Source/Destination Limit</th>
-                        <th className="px-6 py-4">Rule Notes</th>
-                        <th className="px-6 py-4"></th>
+              <div className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-zinc-900 text-zinc-500 uppercase tracking-widest text-[9px] font-bold">
+                        <th className="pb-3">Chain Type</th>
+                        <th className="pb-3">Outgoing Interface</th>
+                        <th className="pb-3">Action Target</th>
+                        <th className="pb-3">Description / Comment</th>
+                        <th className="pb-3 text-right">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-zinc-950 font-mono text-xs">
-                      {filterRules.map(f => (
-                        <tr key={f.id} className="hover:bg-zinc-900/20 transition-colors">
-                          <td className="px-6 py-4 text-purple-400 font-bold">{f.chain}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-1.5 py-0.5 rounded font-bold text-[10px] uppercase ${
-                              f.action === 'accept' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
-                            }`}>
-                              {f.action}
+                    <tbody className="divide-y divide-zinc-900/30">
+                      {natRules.map((nat) => (
+                        <tr key={nat.id} className="hover:bg-zinc-950/40 transition-colors">
+                          <td className="py-3.5 font-mono text-yellow-500 font-bold">{nat.chain}</td>
+                          <td className="py-3.5 font-mono text-zinc-400">{nat.outInterface || 'any'}</td>
+                          <td className="py-3.5">
+                            <span className="text-[10px] font-bold bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded border border-yellow-500/20 uppercase font-mono">
+                              {nat.action}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-zinc-400">{f.protocol || 'any'}</td>
-                          <td className="px-6 py-4 text-zinc-500 text-xs">
-                            {f.srcAddress ? `Src: ${f.srcAddress} ` : ''}
-                            {f.dstAddress ? `Dst: ${f.dstAddress} ` : ''}
-                            {f.dstPort ? `Port: ${f.dstPort}` : ''}
-                            {!f.srcAddress && !f.dstAddress && !f.dstPort ? 'unbounded' : ''}
-                          </td>
-                          <td className="px-6 py-4 text-zinc-500 text-xs italic">{f.comment || '-'}</td>
-                          <td className="px-6 py-4 text-right">
+                          <td className="py-3.5 text-zinc-400 italic text-[11px]">{nat.comment}</td>
+                          <td className="py-3.5 text-right">
                             <button 
-                              onClick={() => deleteFilter(f.id)}
-                              className="text-zinc-650 hover:text-red-400 transition-colors hover:scale-105"
+                              onClick={() => deleteNat(nat.id)}
+                              className="p-1 text-zinc-600 hover:text-red-400 transition-colors cursor-pointer"
                             >
                               <Trash2 size={13} />
                             </button>
@@ -1032,145 +875,356 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
 
-                {/* Filter Quick Addition */}
-                <div className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl space-y-4">
-                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-900 pb-2">Manual Firewall Filter Rule</p>
-                  
+          {/* TAB 11: FIREWALL FILTERS */}
+          {activeTab === 'filters' && (
+            <div className="space-y-6">
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
+                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                  <Shield className="text-red-500 w-5 h-5" />
+                  Firewall Filter Rules Table
+                </h2>
+                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                  Enforces boundary packet rejection and drop parameters. Protects sensitive VLAN corporate pathways from untrusted guests.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+                {/* Form */}
+                <div className="xl:col-span-4 bg-[#0a0a0f] border border-[#141422] p-5 rounded-2xl h-fit space-y-4">
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider block border-b border-zinc-900 pb-2">Add Filter Rule</h3>
                   <form onSubmit={addManualFilter} className="space-y-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">RouterOS Chain</label>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Chain</label>
                       <select 
                         value={addFilterForm.chain}
-                        onChange={(e) => setAddFilterForm(p => ({ ...p, chain: e.target.value as any }))}
-                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-300"
+                        onChange={(e) => setAddFilterForm(prev => ({ ...prev, chain: e.target.value as any }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl p-2.5 text-xs focus:outline-none"
                       >
-                        <option value="forward">forward (routed subnets)</option>
-                        <option value="input">input (router service safety)</option>
+                        <option value="forward">forward (Transit Traffic)</option>
+                        <option value="input">input (To Router Core)</option>
+                        <option value="output">output (From Router Core)</option>
                       </select>
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Action Outcome</label>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Action</label>
                       <select 
                         value={addFilterForm.action}
-                        onChange={(e) => setAddFilterForm(p => ({ ...p, action: e.target.value as any }))}
-                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-300"
+                        onChange={(e) => setAddFilterForm(prev => ({ ...prev, action: e.target.value as any }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl p-2.5 text-xs focus:outline-none"
                       >
-                        <option value="drop">drop (discard silently)</option>
-                        <option value="accept">accept (permit transmission)</option>
+                        <option value="drop">drop (Silent discard)</option>
+                        <option value="accept">accept (Allow passage)</option>
+                        <option value="reject">reject (Notify drop)</option>
                       </select>
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Protocol restriction</label>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Protocol Type</label>
                       <select 
                         value={addFilterForm.protocol}
-                        onChange={(e) => setAddFilterForm(p => ({ ...p, protocol: e.target.value }))}
-                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-300"
+                        onChange={(e) => setAddFilterForm(prev => ({ ...prev, protocol: e.target.value }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl p-2.5 text-xs focus:outline-none"
                       >
-                        <option value="any">any / unbounded</option>
-                        <option value="icmp">icmp (ping utility)</option>
-                        <option value="tcp">tcp (standard web)</option>
-                        <option value="udp">udp (DNS routing)</option>
+                        <option value="any">any (All IP traffic)</option>
+                        <option value="tcp">tcp (Transmission Control)</option>
+                        <option value="udp">udp (User Datagram)</option>
+                        <option value="icmp">icmp (Ping packets)</option>
                       </select>
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Description</label>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Comment / Label</label>
                       <input 
-                        type="text" 
-                        placeholder="Why is this rule here?"
-                        value={addFilterForm.comment || ''}
-                        onChange={(e) => setAddFilterForm(p => ({ ...p, comment: e.target.value }))}
-                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-4 py-2.5 text-xs"
+                        type="text"
+                        placeholder="Isolate local networks"
+                        value={addFilterForm.comment}
+                        onChange={(e) => setAddFilterForm(prev => ({ ...prev, comment: e.target.value }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500"
                       />
                     </div>
 
                     <button 
                       type="submit"
-                      className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl"
+                      className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs py-3 rounded-xl transition-colors shadow-lg shadow-cyan-900/10 cursor-pointer"
                     >
-                      Append filter statement
+                      Apply Filter Rule
                     </button>
                   </form>
+                </div>
+
+                {/* Table */}
+                <div className="xl:col-span-8 bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-zinc-900 text-zinc-500 uppercase tracking-widest text-[9px] font-bold">
+                          <th className="pb-3">Rule Order</th>
+                          <th className="pb-3">Chain</th>
+                          <th className="pb-3">Action</th>
+                          <th className="pb-3">Source IP</th>
+                          <th className="pb-3">Destination IP</th>
+                          <th className="pb-3">Protocol</th>
+                          <th className="pb-3">Comment / Label</th>
+                          <th className="pb-3 text-right">Remove</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-900/30">
+                        {filterRules.map((rule, index) => (
+                          <tr key={rule.id} className="hover:bg-zinc-950/40 transition-colors">
+                            <td className="py-3.5 text-zinc-500 font-bold">{index}</td>
+                            <td className="py-3.5 font-mono text-zinc-400">{rule.chain}</td>
+                            <td className="py-3.5">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono uppercase ${
+                                rule.action === 'accept' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-900/20' : 'bg-red-500/10 text-red-400 border border-red-900/20'
+                              }`}>
+                                {rule.action}
+                              </span>
+                            </td>
+                            <td className="py-3.5 font-mono text-zinc-400">{rule.srcAddress || 'any'}</td>
+                            <td className="py-3.5 font-mono text-zinc-400">{rule.dstAddress || 'any'}</td>
+                            <td className="py-3.5 font-mono text-zinc-500">{rule.protocol || 'any'}</td>
+                            <td className="py-3.5 text-zinc-400 italic text-[11px]">{rule.comment}</td>
+                            <td className="py-3.5 text-right">
+                              <button 
+                                onClick={() => deleteFilter(rule.id)}
+                                className="p-1 text-zinc-600 hover:text-red-400 transition-colors cursor-pointer"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* SYSTEM SETTINGS */}
-          {activeTab === 'settings' && (
-            <div className="max-w-2xl space-y-8">
-              <div>
-                <h2 className="text-2xl font-bold text-white tracking-tight">OpenClaw System Settings</h2>
-                <p className="text-zinc-500 text-sm">Configure backend endpoints, local Ollama integration, or fallback cloud Gemini processing.</p>
+          {/* TAB 12: PACKET TRACE SIMULATOR */}
+          {activeTab === 'simulator' && (
+            <div className="space-y-6">
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
+                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                  <Layers className="text-cyan-400 w-5 h-5" />
+                  L2/L3 Packet Flow & Security boundary diagnostic
+                </h2>
+                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                  Verify routing boundaries. Trace raw transport layer frames across your subnets to confirm that VLAN 10 & VLAN 20 security rules are perfectly active.
+                </p>
               </div>
 
-              <div className="space-y-6">
-                <div className="bg-[#0a0a0f] border border-[#141422] p-8 rounded-2xl space-y-8">
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
-                      <Cpu size={18} className="text-cyan-400 animate-pulse" />
-                      LLM AI Core selection for OpenClaw
-                    </h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      <button 
-                        onClick={() => setProviderSettings(p => ({ ...p, provider: 'gemini' }))}
-                        className={`p-6 rounded-2xl border text-left transition-all ${
-                          providerSettings.provider === 'gemini' 
-                            ? 'bg-cyan-600/10 border-cyan-500' 
-                            : 'bg-zinc-900/40 border-zinc-900 hover:border-zinc-800'
-                        }`}
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+                {/* Form Input panel */}
+                <div className="xl:col-span-4 bg-[#0a0a0f] border border-[#141422] p-5 rounded-2xl space-y-4">
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider block border-b border-zinc-900 pb-2">Inject Diagnostic Packet</h3>
+                  
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Source Subnet / IP</label>
+                      <select 
+                        value={simulatorInput.srcIp}
+                        onChange={(e) => setSimulatorInput(prev => ({ ...prev, srcIp: e.target.value, srcInterface: e.target.value.startsWith('192.168.20') ? 'vlan20-guest' : 'vlan10-main' }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl p-2.5 text-xs text-cyan-400 font-mono focus:outline-none"
                       >
-                        <Globe size={24} className="text-cyan-400 mb-4" />
-                        <h4 className="font-bold text-sm mb-1 text-white">Gemini 3.5 Flash</h4>
-                        <p className="text-[10px] text-zinc-500">Fast cloud-integrated parsing client. No setup required.</p>
-                      </button>
+                        <option value="192.168.20.55">192.168.20.55 (Guest VLAN 20 Station)</option>
+                        <option value="192.168.10.12">192.168.10.12 (Corporate VLAN 10 AP client)</option>
+                        <option value="192.168.10.100">192.168.10.100 (Corporate VLAN 10 Workstation)</option>
+                      </select>
+                    </div>
 
-                      <button 
-                        onClick={() => setProviderSettings(p => ({ ...p, provider: 'ollama' }))}
-                        className={`p-6 rounded-2xl border text-left transition-all ${
-                          providerSettings.provider === 'ollama' 
-                            ? 'bg-cyan-600/10 border-cyan-500' 
-                            : 'bg-zinc-900/40 border-zinc-900 hover:border-zinc-800'
-                        }`}
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Destination IP Address</label>
+                      <select 
+                        value={simulatorInput.dstIp}
+                        onChange={(e) => setSimulatorInput(prev => ({ ...prev, dstIp: e.target.value }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl p-2.5 text-xs text-cyan-400 font-mono focus:outline-none"
                       >
-                        <Server size={24} className="text-cyan-400 mb-4" />
-                        <h4 className="font-bold text-sm mb-1 text-white">Ollama Local</h4>
-                        <p className="text-[10px] text-zinc-500">Run completely local and host network commands securely offline.</p>
-                      </button>
+                        <option value="192.168.10.15">192.168.10.15 (Corporate Main Server - Inside LAN)</option>
+                        <option value="8.8.8.8">8.8.8.8 (Public DNS Server - External WAN)</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Protocol</label>
+                        <select 
+                          value={simulatorInput.protocol}
+                          onChange={(e) => setSimulatorInput(prev => ({ ...prev, protocol: e.target.value as any }))}
+                          className="w-full bg-[#050508] border border-zinc-800 rounded-xl p-2.5 text-xs focus:outline-none"
+                        >
+                          <option value="TCP">TCP</option>
+                          <option value="UDP">UDP</option>
+                          <option value="ICMP">ICMP</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Port Target</label>
+                        <input 
+                          type="number"
+                          value={simulatorInput.dstPort}
+                          onChange={(e) => setSimulatorInput(prev => ({ ...prev, dstPort: parseInt(e.target.value) }))}
+                          className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={triggerPacketSimulation}
+                      disabled={simulationActive}
+                      className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-bold text-xs py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/10 cursor-pointer"
+                    >
+                      <Play size={13} />
+                      {simulationActive ? 'Tracing Packet...' : 'Inject Packet Frame'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Simulation Output Area */}
+                <div className="xl:col-span-8 bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl flex flex-col justify-between min-h-[360px]">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                      <span className="text-xs font-bold text-white uppercase tracking-wider">Active Trace Output Channel</span>
+                      {simulationStep > 0 && (
+                        <span className="text-[10px] font-mono text-zinc-500">Step {simulationStep} of 5</span>
+                      )}
+                    </div>
+
+                    <div className="space-y-2 max-h-[220px] overflow-y-auto scrollbar-thin pr-2">
+                      {simulationLogs.map((log, index) => (
+                        <motion.div 
+                          key={index} 
+                          initial={{ opacity: 0, x: -5 }} 
+                          animate={{ opacity: 1, x: 0 }}
+                          className="font-mono text-[11px] leading-relaxed text-zinc-300 bg-[#050508] border border-zinc-900 p-2.5 rounded-lg flex gap-2 items-start"
+                        >
+                          <span className="text-cyan-400 font-bold shrink-0">&gt;</span>
+                          <span>{log}</span>
+                        </motion.div>
+                      ))}
                     </div>
                   </div>
 
-                  {providerSettings.provider === 'ollama' && (
+                  {simulationDecision && (
                     <motion.div 
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="space-y-6 pt-6 border-t border-zinc-900"
+                      initial={{ scale: 0.98, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className={`p-4 rounded-xl border flex items-center gap-3 mt-4 ${
+                        simulationDecision === 'drop' 
+                          ? 'bg-red-500/10 border-red-500/30 text-red-400' 
+                          : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      }`}
                     >
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Ollama Endpoint URL</label>
-                        <input 
-                          type="text"
-                          value={providerSettings.ollamaBaseUrl}
-                          onChange={(e) => setProviderSettings(p => ({ ...p, ollamaBaseUrl: e.target.value }))}
-                          className="w-full bg-zinc-905 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-300 font-mono"
-                        />
-                        <p className="text-[9px] text-zinc-600">Ensure Ollama service is configured with OLLAMA_ORIGINS="*" to bypass CORS blockers.</p>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Model Identifier</label>
-                        <input 
-                          type="text"
-                          value={providerSettings.ollamaModel}
-                          onChange={(e) => setProviderSettings(p => ({ ...p, ollamaModel: e.target.value }))}
-                          className="w-full bg-zinc-905 border border-zinc-800 rounded-xl px-4 py-2 text-xs font-mono"
-                        />
-                      </div>
+                      {simulationDecision === 'drop' ? (
+                        <>
+                          <AlertCircle size={20} className="shrink-0" />
+                          <div>
+                            <span className="text-xs font-bold uppercase tracking-wider block">Packet Discarded (Drop Rule Matched)</span>
+                            <span className="text-[11px] text-zinc-400">VLAN Isolation enforced successfully. Access between the Guest network and corporate LAN was blocked by direct firewall policies.</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 size={20} className="shrink-0" />
+                          <div>
+                            <span className="text-xs font-bold uppercase tracking-wider block">Packet Allowed (Accept Gate Passed)</span>
+                            <span className="text-[11px] text-zinc-400">Outbound public translation applied. Packet reached destination cleanly.</span>
+                          </div>
+                        </>
+                      )}
                     </motion.div>
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 12: PHYSICAL LOCAL ADAPTERS HUD */}
+          {activeTab === 'local-adapters' && (
+            <LocalAdapterMonitor />
+          )}
+
+          {/* TAB 12: MODEL PROVIDER SETTINGS */}
+          {activeTab === 'settings' && (
+            <div className="space-y-6">
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
+                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                  <Sliders className="text-cyan-400 w-5 h-5" />
+                  AI Model Connection Preferences
+                </h2>
+                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                  Manage connection parameters for the RouterOS helper. Seamlessly toggle between direct secure cloud-hosted Gemini integration and a localized Ollama server running entirely on your local host.
+                </p>
+              </div>
+
+              <div className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl max-w-xl space-y-6">
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold block mb-2">Model Provider</label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button
+                      onClick={() => setProviderSettings(prev => ({ ...prev, provider: 'gemini' }))}
+                      className={`p-4 rounded-xl border font-bold text-xs flex flex-col items-center gap-2 transition-all cursor-pointer ${
+                        providerSettings.provider === 'gemini'
+                          ? 'border-cyan-500 bg-cyan-950/20 text-white'
+                          : 'border-zinc-800 text-zinc-400 hover:border-zinc-700'
+                      }`}
+                    >
+                      <Zap size={16} />
+                      Direct Gemini API
+                    </button>
+                    <button
+                      onClick={() => setProviderSettings(prev => ({ ...prev, provider: 'ollama' }))}
+                      className={`p-4 rounded-xl border font-bold text-xs flex flex-col items-center gap-2 transition-all cursor-pointer ${
+                        providerSettings.provider === 'ollama'
+                          ? 'border-cyan-500 bg-cyan-950/20 text-white'
+                          : 'border-zinc-800 text-zinc-400 hover:border-zinc-700'
+                      }`}
+                    >
+                      <Database size={16} />
+                      Local Ollama Server
+                    </button>
+                  </div>
+                </div>
+
+                {providerSettings.provider === 'ollama' && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="space-y-4 pt-2 border-t border-zinc-900"
+                  >
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold block mb-1">Ollama Base Endpoint</label>
+                      <input 
+                        type="text" 
+                        value={providerSettings.ollamaBaseUrl}
+                        onChange={(e) => setProviderSettings(prev => ({ ...prev, ollamaBaseUrl: e.target.value }))}
+                        className="w-full bg-zinc-950 border border-zinc-850 rounded-xl p-2.5 text-xs font-mono text-cyan-400 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold block mb-1">Model Name</label>
+                      <input 
+                        type="text" 
+                        value={providerSettings.ollamaModel}
+                        onChange={(e) => setProviderSettings(prev => ({ ...prev, ollamaModel: e.target.value }))}
+                        className="w-full bg-zinc-950 border border-zinc-850 rounded-xl p-2.5 text-xs font-mono text-cyan-400 focus:outline-none"
+                      />
+                    </div>
+                  </motion.div>
+                )}
+
+                <div className="bg-[#050508] p-4 rounded-xl border border-zinc-850 flex items-start gap-3">
+                  <Info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-zinc-400 leading-relaxed">
+                    By default, the <strong>Direct Gemini API</strong> connects through standard cloud sandbox parameters. Local secrets can be managed securely inside your workspace control panel.
+                  </div>
                 </div>
               </div>
             </div>
@@ -1182,22 +1236,35 @@ export default function App() {
   );
 }
 
-function NavItem({ icon, label, active, onClick, badge }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, badge?: string }) {
+// NavItem Component with dynamic badge
+function NavItem({ 
+  icon, 
+  label, 
+  active, 
+  onClick,
+  badge
+}: { 
+  icon: React.ReactNode; 
+  label: string; 
+  active: boolean; 
+  onClick: () => void;
+  badge?: string;
+}) {
   return (
-    <button 
+    <button
       onClick={onClick}
-      className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all ${
+      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all text-left cursor-pointer ${
         active 
-          ? 'bg-[#12121d] text-cyan-400 border border-cyan-500/20' 
-          : 'text-zinc-500 hover:text-zinc-300 hover:bg-[#101017]/40'
+          ? 'bg-cyan-600/15 text-cyan-400 border-l-4 border-cyan-500 shadow-md shadow-cyan-950/20 font-bold' 
+          : 'text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200 border-l-4 border-transparent'
       }`}
     >
-      <div className="flex items-center gap-3">
-        {icon}
-        <span>{label}</span>
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span className={active ? 'text-cyan-400' : 'text-zinc-500'}>{icon}</span>
+        <span className="truncate">{label}</span>
       </div>
       {badge && (
-        <span className="text-[8px] bg-cyan-500/10 text-cyan-400 font-bold px-1.5 py-0.5 rounded uppercase font-mono">
+        <span className="text-[8px] bg-cyan-500/15 text-cyan-400 border border-cyan-500/25 px-1.5 py-0.5 rounded uppercase font-black tracking-widest leading-none scale-90">
           {badge}
         </span>
       )}

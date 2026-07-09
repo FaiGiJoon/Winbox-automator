@@ -142,6 +142,41 @@ Only output the JSON object. Do not output conversational filler.`;
   }
 });
 
+// In-memory state store for live local network adapter scans
+let localTelemetry = {
+  lastUpdated: null as string | null,
+  adapters: [] as any[],
+  mikrotikDevices: [] as any[],
+  events: [] as string[]
+};
+
+// POST endpoint for a local script to report adapter & neighbor information
+app.post("/api/local-adapters", (req, res) => {
+  const { adapters, mikrotikDevices, events } = req.body;
+  
+  // Format incoming items nicely and limit history length for events
+  const newEvents = events || [];
+  const currentEvents = [...newEvents, ...(localTelemetry.events || [])].slice(0, 15);
+
+  localTelemetry = {
+    lastUpdated: new Date().toISOString(),
+    adapters: adapters || [],
+    mikrotikDevices: mikrotikDevices || [],
+    events: currentEvents
+  };
+  
+  res.json({ 
+    status: "success", 
+    message: "Adapter telemetry synchronized", 
+    synchronizedAt: localTelemetry.lastUpdated 
+  });
+});
+
+// GET endpoint for the React frontend to fetch live status
+app.get("/api/local-adapters", (req, res) => {
+  res.json(localTelemetry);
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
