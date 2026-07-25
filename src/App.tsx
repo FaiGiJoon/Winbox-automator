@@ -1148,7 +1148,13 @@ export default function App() {
 
           {/* TAB 12: PHYSICAL LOCAL ADAPTERS HUD */}
           {activeTab === 'local-adapters' && (
-            <LocalAdapterMonitor />
+            <LocalAdapterMonitor
+              addLog={addLog}
+              setIps={setIps}
+              setFilterRules={setFilterRules}
+              setNatRules={setNatRules}
+              setInterfaces={setInterfaces}
+            />
           )}
 
           {/* TAB 12: MODEL PROVIDER SETTINGS */}
