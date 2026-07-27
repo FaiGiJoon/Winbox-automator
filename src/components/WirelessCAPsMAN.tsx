@@ -57,20 +57,41 @@ export default function WirelessCAPsMAN() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-            <Radio className="text-cyan-400 w-5 h-5" />
-            Wave2 CAPsMAN Wi-Fi Controller
-          </h2>
-          <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-900/30 px-2.5 py-1 rounded text-xs font-bold">
+      <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+              <Radio className="text-cyan-400 w-5 h-5" />
+              Wave2 CAPsMAN Wi-Fi Controller
+            </h2>
+          </div>
+          <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+            Configure central wireless access control via the Wave2 engine. This controller manages SSIDs, secure WPA3 auth templates, dynamic VLAN assignments (VLAN 10 for Core, VLAN 20 for Guest), and enforces ACL filters.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="bg-cyan-500/10 border border-cyan-500/25 px-4 py-2 rounded-xl shrink-0 flex items-center gap-2.5">
+            <div className="p-1.5 bg-cyan-950/40 text-cyan-400 font-extrabold text-xs rounded border border-cyan-850">
+              L1 & L2
+            </div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 leading-none">OSI Layers</div>
+              <div className="text-[9px] text-cyan-400 font-mono mt-0.5">Physical & Data Link</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-900/30 px-2.5 py-1.5 rounded text-xs font-bold shrink-0 h-fit">
             <CheckCircle2 size={13} />
-            Active Service (v7.13+)
+            v7.13+
           </div>
         </div>
-        <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-          Configure central wireless access control via the Wave2 engine. This controller manages SSIDs, secure WPA3 auth templates, dynamic VLAN assignments (VLAN 10 for Core, VLAN 20 for Guest), and enforces ACL filters.
-        </p>
+      </div>
+
+      {/* OSI Model Mapping Educational Banner */}
+      <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3">
+        <span className="text-cyan-400 font-bold shrink-0 text-xs mt-0.5">ℹ️</span>
+        <div className="text-xs text-zinc-400 leading-relaxed">
+          <span className="font-bold text-white">OSI Model Alignment:</span> Wi-Fi channels and radio frequencies operate at <span className="text-cyan-300 font-semibold">Layer 1 (Physical - RF Spectrum)</span>. The CAPsMAN controller handles wireless client authentication, association states, SSIDs, and dynamic VLAN frame tagging at <span className="text-cyan-300 font-semibold">Layer 2 (Data Link - MAC frames)</span>, binding devices into bridge groups.
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

@@ -80,14 +80,33 @@ export default function InterfaceMangle() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-        <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-          <Cpu className="text-cyan-400 w-5 h-5" />
-          System Settings & Interface Grouping
-        </h2>
-        <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-          Administer hardware-level interfaces and configurations. Toggle RoMON layer-2 neighbors discovery, manage security interface lists, fine-tune LTE APN pass-through parameters, and inspect Wi-Fi controller active event logs.
-        </p>
+      <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+            <Cpu className="text-cyan-400 w-5 h-5" />
+            System Settings & Interface Grouping
+          </h2>
+          <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+            Administer hardware-level interfaces and configurations. Toggle RoMON layer-2 neighbors discovery, manage security interface lists, fine-tune LTE APN pass-through parameters, and inspect Wi-Fi controller active event logs.
+          </p>
+        </div>
+        <div className="bg-cyan-500/10 border border-cyan-500/25 px-4 py-2 rounded-xl shrink-0 flex items-center gap-2.5">
+          <div className="p-1.5 bg-cyan-950/40 text-cyan-400 font-extrabold text-xs rounded border border-cyan-850">
+            L2 & L3
+          </div>
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 leading-none">OSI Layers</div>
+            <div className="text-[9px] text-cyan-400 font-mono mt-0.5">Data Link & Network</div>
+          </div>
+        </div>
+      </div>
+
+      {/* OSI Model Mapping Educational Banner */}
+      <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3">
+        <span className="text-cyan-400 font-bold shrink-0 text-xs mt-0.5">ℹ️</span>
+        <div className="text-xs text-zinc-400 leading-relaxed">
+          <span className="font-bold text-white">OSI Model Alignment:</span> Router Management Overlay Network (RoMON) is a proprietary MikroTik protocol operating completely at <span className="text-cyan-300 font-semibold">Layer 2 (Data Link)</span>, allowing full management of local routers via MAC addresses even without Layer 3 IP connectivity. System clock times and interface list groupings help coordinate policy routing at <span className="text-cyan-300 font-semibold">Layer 3 (Network)</span>.
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">

@@ -284,7 +284,7 @@ export default function App() {
     setSimulationActive(true);
     setSimulationStep(1);
     setSimulationDecision(null);
-    setSimulationLogs(['Initiating L2/L3 packet routing and VLAN boundary isolation diagnostic trace...']);
+    setSimulationLogs(['[Step 1] [OSI Layer 1 Physical] Initiating L2/L3 packet routing and VLAN boundary isolation diagnostic trace on hardware port...']);
   };
 
   // Tracing packet simulator trace ticks
@@ -296,14 +296,14 @@ export default function App() {
         const nextStep = prev + 1;
         
         if (nextStep === 2) {
-          const logMsg = `[Step 2] Route Decision: Ingress packet verified on physical sub-interface [${simulatorInput.srcInterface}]. Packet Source Subnet: ${simulatorInput.srcIp}. Port assigned to protocol ${simulatorInput.protocol}.`;
+          const logMsg = `[Step 2] [OSI Layer 2 Data Link] Route Ingress Decision: Frame verified on sub-interface [${simulatorInput.srcInterface}]. MAC boundaries confirmed. Packet Source Subnet IP: ${simulatorInput.srcIp}. Protocol: ${simulatorInput.protocol}.`;
           setSimulationLogs(logs => [...logs, logMsg]);
           return nextStep;
         }
 
         if (nextStep === 3) {
           const hasNAT = natRules.some(n => n.chain === 'srcnat' && n.action === 'masquerade');
-          const logMsg = `[Step 3] PREROUTING / NAT checking: Masquerade NAT rule verified on uplink lte1: ${hasNAT ? 'ACTIVE (Outbound translations enabled)' : 'DISABLED'}`;
+          const logMsg = `[Step 3] [OSI Layer 3 Network] PREROUTING / NAT translation check: Masquerade NAT rule verified on uplink lte1: ${hasNAT ? 'ACTIVE (Layer 3 Source IP rewritten to WAN)' : 'DISABLED (No L3 translation)'}`;
           setSimulationLogs(logs => [...logs, logMsg]);
           return nextStep;
         }
@@ -334,16 +334,16 @@ export default function App() {
           }
 
           setSimulationDecision(fate);
-          const logMsg = `[Step 4] FIREWALL FORWARD / INPUT chain check: Decision: [${fate.toUpperCase()}]. ${matchReason}`;
+          const logMsg = `[Step 4] [OSI Layer 3/4 Network & Transport] FIREWALL FORWARD / INPUT chain check: Match rules evaluate src-ip (${simulatorInput.srcIp}) and dst-port (${simulatorInput.dstPort}). Decision: [${fate.toUpperCase()}]. ${matchReason}`;
           setSimulationLogs(logs => [...logs, logMsg]);
           return nextStep;
         }
 
         if (nextStep === 5) {
           if (simulationDecision === 'drop') {
-            setSimulationLogs(logs => [...logs, `[Step 5] Finished: Packet discarded by RouterOS firewall filter. VLAN isolation enforced.`]);
+            setSimulationLogs(logs => [...logs, `[Step 5] [OSI Layer 3/4 Discard] Finished: Packet discarded by RouterOS firewall filter. VLAN isolation and switching boundary enforced.`]);
           } else {
-            setSimulationLogs(logs => [...logs, `[Step 5] POSTROUTING NAT applied. IP translated. Packet forwarded successfully to destination IP ${simulatorInput.dstIp} on port ${simulatorInput.dstPort}.`]);
+            setSimulationLogs(logs => [...logs, `[Step 5] [OSI Layer 3/4 Forward] POSTROUTING NAT applied. Network translation succeeded. Segment forwarded successfully to destination IP ${simulatorInput.dstIp} on port ${simulatorInput.dstPort}.`]);
           }
           setSimulationActive(false);
           return 0; // stop
@@ -384,13 +384,14 @@ export default function App() {
             label="Direct AI Companion" 
             active={activeTab === 'terminal'} 
             onClick={() => setActiveTab('terminal')} 
-            badge="Secure"
+            badge="L7 App"
           />
           <NavItem 
             icon={<Layers size={16} />} 
             label="Packet Flow Trace" 
             active={activeTab === 'simulator'} 
             onClick={() => setActiveTab('simulator')} 
+            badge="L2-L4 Trace"
           />
 
           <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mt-4 mb-2">Topology & Wireless</p>
@@ -399,14 +400,14 @@ export default function App() {
             label="Network Topology" 
             active={activeTab === 'topology'} 
             onClick={() => setActiveTab('topology')} 
-            badge="New"
+            badge="L1-L3 Map"
           />
           <NavItem 
             icon={<Radio size={16} />} 
             label="Wave2 CAPsMAN WiFi" 
             active={activeTab === 'capsman'} 
             onClick={() => setActiveTab('capsman')} 
-            badge="New"
+            badge="L1-L2 RF"
           />
 
           <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mt-4 mb-2">Layer 2 & Layer 3 Protection</p>
@@ -415,21 +416,21 @@ export default function App() {
             label="Simple DHCP Leases" 
             active={activeTab === 'dhcp'} 
             onClick={() => setActiveTab('dhcp')} 
-            badge="New"
+            badge="L3 & L7"
           />
           <NavItem 
             icon={<Sliders size={16} />} 
             label="STP Loop Prevention" 
             active={activeTab === 'stp'} 
             onClick={() => setActiveTab('stp')} 
-            badge="New"
+            badge="L2 switching"
           />
           <NavItem 
             icon={<Lock size={16} />} 
             label="WireGuard VPN Tunnels" 
             active={activeTab === 'wireguard'} 
             onClick={() => setActiveTab('wireguard')} 
-            badge="New"
+            badge="L3 Tunnel"
           />
 
           <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mt-4 mb-2">Tables & Hardware</p>
@@ -438,31 +439,35 @@ export default function App() {
             label="Physical Adapters HUD" 
             active={activeTab === 'local-adapters'} 
             onClick={() => setActiveTab('local-adapters')} 
-            badge="Live"
+            badge="L1 Link"
           />
           <NavItem 
             icon={<Activity size={16} />} 
             label="Interfaces" 
             active={activeTab === 'interfaces'} 
             onClick={() => setActiveTab('interfaces')} 
+            badge="L1-L2 port"
           />
           <NavItem 
             icon={<Database size={16} />} 
             label="IP Address Pool" 
             active={activeTab === 'ips'} 
             onClick={() => setActiveTab('ips')} 
+            badge="L3 Subnets"
           />
           <NavItem 
             icon={<Shield size={16} className="text-yellow-500" />} 
             label="NAT Masquerade" 
             active={activeTab === 'nat'} 
             onClick={() => setActiveTab('nat')} 
+            badge="L3-L4 NAT"
           />
           <NavItem 
             icon={<Shield size={16} className="text-red-500" />} 
             label="Firewall Filters" 
             active={activeTab === 'filters'} 
             onClick={() => setActiveTab('filters')} 
+            badge="L3-L4 ACL"
           />
 
           <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mt-4 mb-2">Settings</p>
@@ -471,7 +476,7 @@ export default function App() {
             label="RoMON & Clock System" 
             active={activeTab === 'mangle'} 
             onClick={() => setActiveTab('mangle')} 
-            badge="New"
+            badge="L2 RoMON"
           />
           <NavItem 
             icon={<Sliders size={16} />} 
@@ -669,14 +674,32 @@ export default function App() {
           {/* TAB 8: PHYSICAL INTERFACES */}
           {activeTab === 'interfaces' && (
             <div className="space-y-6">
-              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                  <Activity className="text-cyan-400 w-5 h-5" />
-                  RouterOS Virtual Interfaces
-                </h2>
-                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-                  Real-time status tracking of physical and logical network boundaries in your setup, hosting active subnets and loop protections.
-                </p>
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    <Activity className="text-cyan-400 w-5 h-5" />
+                    RouterOS Virtual Interfaces
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                    Real-time status tracking of physical and logical network boundaries in your setup, hosting active subnets and loop protections.
+                  </p>
+                </div>
+                <div className="bg-cyan-500/10 border border-cyan-500/25 px-4 py-2 rounded-xl shrink-0 flex items-center gap-2.5">
+                  <div className="p-1.5 bg-cyan-950/40 text-cyan-400 font-extrabold text-xs rounded border border-cyan-850">
+                    L1 & L2
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 leading-none">OSI Layers</div>
+                    <div className="text-[9px] text-cyan-400 font-mono mt-0.5">Physical & Data Link</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3 text-xs text-zinc-400">
+                <Info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-white">OSI Model Alignment:</span> Physical interfaces map directly to <span className="text-cyan-300 font-semibold">Layer 1 (Physical)</span>, tracking mechanical and electrical links (ethernet, SFP+), while logical VLANs, bridges, and MTU bounds operate at <span className="text-cyan-300 font-semibold">Layer 2 (Data Link)</span>, encapsulating frames using MAC addresses.
+                </div>
               </div>
 
               <div className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl">
@@ -726,7 +749,7 @@ export default function App() {
           {/* TAB 9: IP POOL */}
           {activeTab === 'ips' && (
             <div className="space-y-6">
-              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex items-center justify-between">
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
                     <Database className="text-cyan-400 w-5 h-5" />
@@ -735,6 +758,22 @@ export default function App() {
                   <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
                     Set up direct layer-3 IP pathways on your VLAN interfaces. Packets are evaluated inside the flow trace based on these bounds.
                   </p>
+                </div>
+                <div className="bg-cyan-500/10 border border-cyan-500/25 px-4 py-2 rounded-xl shrink-0 flex items-center gap-2.5">
+                  <div className="p-1.5 bg-cyan-950/40 text-cyan-400 font-extrabold text-xs rounded border border-cyan-850">
+                    Layer 3
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 leading-none">OSI Layer</div>
+                    <div className="text-[9px] text-cyan-400 font-mono mt-0.5">Network Layer</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3 text-xs text-zinc-400">
+                <Info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-white">OSI Model Alignment:</span> IP Address pools, network subnets, and default gateway mappings operate exclusively at <span className="text-cyan-300 font-semibold">Layer 3 (Network)</span>. This layer determines logical IP addressing boundaries, sub-netting, and logical routing choices across heterogeneous media.
                 </div>
               </div>
 
@@ -829,14 +868,32 @@ export default function App() {
           {/* TAB 10: NAT TABLE */}
           {activeTab === 'nat' && (
             <div className="space-y-6">
-              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                  <Shield className="text-yellow-500 w-5 h-5" />
-                  Firewall NAT Table
-                </h2>
-                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-                  Translates internal private network frames to outbound public internet envelopes.
-                </p>
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    <Shield className="text-yellow-500 w-5 h-5" />
+                    Firewall NAT Table
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                    Translates internal private network frames to outbound public internet envelopes.
+                  </p>
+                </div>
+                <div className="bg-cyan-500/10 border border-cyan-500/25 px-4 py-2 rounded-xl shrink-0 flex items-center gap-2.5">
+                  <div className="p-1.5 bg-cyan-950/40 text-cyan-400 font-extrabold text-xs rounded border border-cyan-850">
+                    L3 & L4
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 leading-none">OSI Layers</div>
+                    <div className="text-[9px] text-cyan-400 font-mono mt-0.5">Network & Transport</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3 text-xs text-zinc-400">
+                <Info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-white">OSI Model Alignment:</span> Network Address Translation (NAT) maps local IP headers to a single public IP at <span className="text-cyan-300 font-semibold">Layer 3 (Network)</span>, while dynamically translating source ports at <span className="text-cyan-300 font-semibold">Layer 4 (Transport)</span> to multiplex multiple inside hosts onto a single public IP.
+                </div>
               </div>
 
               <div className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl">
@@ -882,14 +939,32 @@ export default function App() {
           {/* TAB 11: FIREWALL FILTERS */}
           {activeTab === 'filters' && (
             <div className="space-y-6">
-              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                  <Shield className="text-red-500 w-5 h-5" />
-                  Firewall Filter Rules Table
-                </h2>
-                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-                  Enforces boundary packet rejection and drop parameters. Protects sensitive VLAN corporate pathways from untrusted guests.
-                </p>
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    <Shield className="text-red-500 w-5 h-5" />
+                    Firewall Filter Rules Table
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                    Enforces boundary packet rejection and drop parameters. Protects sensitive VLAN corporate pathways from untrusted guests.
+                  </p>
+                </div>
+                <div className="bg-cyan-500/10 border border-cyan-500/25 px-4 py-2 rounded-xl shrink-0 flex items-center gap-2.5">
+                  <div className="p-1.5 bg-cyan-950/40 text-cyan-400 font-extrabold text-xs rounded border border-cyan-850">
+                    L3 & L4
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 leading-none">OSI Layers</div>
+                    <div className="text-[9px] text-cyan-400 font-mono mt-0.5">Network & Transport</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3 text-xs text-zinc-400">
+                <Info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-white">OSI Model Alignment:</span> RouterOS Firewall Filters inspect logical IP bounds at <span className="text-cyan-300 font-semibold">Layer 3 (Network)</span> (e.g. drop rules between 192.168.20.0/24 and 192.168.10.0/24) and match UDP/TCP transport protocol ports at <span className="text-cyan-300 font-semibold">Layer 4 (Transport)</span> (e.g. port 80, 443 pings).
+                </div>
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
@@ -1010,14 +1085,32 @@ export default function App() {
           {/* TAB 12: PACKET TRACE SIMULATOR */}
           {activeTab === 'simulator' && (
             <div className="space-y-6">
-              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                  <Layers className="text-cyan-400 w-5 h-5" />
-                  L2/L3 Packet Flow & Security boundary diagnostic
-                </h2>
-                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-                  Verify routing boundaries. Trace raw transport layer frames across your subnets to confirm that VLAN 10 & VLAN 20 security rules are perfectly active.
-                </p>
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    <Layers className="text-cyan-400 w-5 h-5" />
+                    L2/L3 Packet Flow & Security boundary diagnostic
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                    Verify routing boundaries. Trace raw transport layer frames across your subnets to confirm that VLAN 10 & VLAN 20 security rules are perfectly active.
+                  </p>
+                </div>
+                <div className="bg-cyan-500/10 border border-cyan-500/25 px-4 py-2 rounded-xl shrink-0 flex items-center gap-2.5">
+                  <div className="p-1.5 bg-cyan-950/40 text-cyan-400 font-extrabold text-xs rounded border border-cyan-850">
+                    L2 & L3 & L4
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 leading-none">OSI Layers</div>
+                    <div className="text-[9px] text-cyan-400 font-mono mt-0.5">Data Link, Network, Transport</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3 text-xs text-zinc-400">
+                <Info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-white">OSI Model Alignment:</span> The Packet Flow diagnostic maps the transition of a frame from <span className="text-cyan-300 font-semibold">Layer 2 (Data Link - Ethernet sub-interfaces/VLAN mappings)</span>, up to <span className="text-cyan-300 font-semibold">Layer 3 (Network - IP Addressing & Routing tables)</span>, and matches ACL decisions on port boundaries at <span className="text-cyan-300 font-semibold">Layer 4 (Transport - TCP/UDP segment ports)</span>.
+                </div>
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">

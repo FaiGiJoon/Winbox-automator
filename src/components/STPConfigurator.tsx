@@ -55,14 +55,33 @@ export default function STPConfigurator() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-        <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-          <Network className="text-cyan-400 w-5 h-5" />
-          Layer 2 Loop Prevention: STP Engine
-        </h2>
-        <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-          Configure Spanning Tree protocols. RSTP is configured for isolated non-VLAN broadcast domains (such as local access bridges) to avoid switching loops. MSTP is deployed on VLAN trunks to allocate optimized logical trees per VLAN instance.
-        </p>
+      <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+            <Network className="text-cyan-400 w-5 h-5" />
+            Layer 2 Loop Prevention: STP Engine
+          </h2>
+          <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+            Configure Spanning Tree protocols. RSTP is configured for isolated non-VLAN broadcast domains (such as local access bridges) to avoid switching loops. MSTP is deployed on VLAN trunks to allocate optimized logical trees per VLAN instance.
+          </p>
+        </div>
+        <div className="bg-cyan-500/10 border border-cyan-500/25 px-4 py-2 rounded-xl shrink-0 flex items-center gap-2.5">
+          <div className="p-1.5 bg-cyan-950/40 text-cyan-400 font-extrabold text-xs rounded border border-cyan-850">
+            Layer 2
+          </div>
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 leading-none">OSI Layer</div>
+            <div className="text-[9px] text-cyan-400 font-mono mt-0.5">Data Link Layer</div>
+          </div>
+        </div>
+      </div>
+
+      {/* OSI Model Mapping Educational Banner */}
+      <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3">
+        <span className="text-cyan-400 font-bold shrink-0 text-xs mt-0.5">ℹ️</span>
+        <div className="text-xs text-zinc-400 leading-relaxed">
+          <span className="font-bold text-white">OSI Model Alignment:</span> Spanning Tree Protocols (STP, RSTP, MSTP) operate entirely within <span className="text-cyan-300 font-semibold">Layer 2 (Data Link)</span>. They prevent packet storms by detecting and disabling physical switching loops at the frame layer, without inspectable Layer 3 IP addressing knowledge.
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

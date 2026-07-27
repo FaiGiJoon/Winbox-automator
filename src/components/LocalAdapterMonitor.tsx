@@ -915,6 +915,14 @@ syncTelemetry();
         </div>
       </div>
 
+      {/* OSI Model Mapping Educational Banner */}
+      <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3">
+        <span className="text-cyan-400 font-bold shrink-0 text-xs mt-0.5">ℹ️</span>
+        <div className="text-xs text-zinc-400 leading-relaxed">
+          <span className="font-bold text-white">OSI Model Alignment:</span> Network adapter links and connection status reflect <span className="text-cyan-300 font-semibold">Layer 1 (Physical)</span> carrier connections and duplex speeds. MAC address queries and system ARP tables reside at <span className="text-cyan-300 font-semibold">Layer 2 (Data Link)</span>, whereas assigning IPv4 configurations, default gateways, and custom routing policies coordinates traffic flow at <span className="text-cyan-300 font-semibold">Layer 3 (Network)</span>.
+        </div>
+      </div>
+
       {/* Tabs Menu */}
       <div className="border-b border-[#141424] flex gap-4">
         <button
