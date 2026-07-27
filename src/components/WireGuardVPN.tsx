@@ -74,14 +74,33 @@ export default function WireGuardVPN() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-        <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-          <Shield className="text-cyan-400 w-5 h-5" />
-          WireGuard VPN Server Endpoint
-        </h2>
-        <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-          Manage secure Virtual Private Network tunnels. Configured with a Road Warrior interface for remote client connections (using high efficiency handshakes) and a robust Site-to-Site tunnel connecting your physical Berlin branch office.
-        </p>
+      <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+            <Shield className="text-cyan-400 w-5 h-5" />
+            WireGuard VPN Server Endpoint
+          </h2>
+          <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+            Manage secure Virtual Private Network tunnels. Configured with a Road Warrior interface for remote client connections (using high efficiency handshakes) and a robust Site-to-Site tunnel connecting your physical Berlin branch office.
+          </p>
+        </div>
+        <div className="bg-cyan-500/10 border border-cyan-500/25 px-4 py-2 rounded-xl shrink-0 flex items-center gap-2.5">
+          <div className="p-1.5 bg-cyan-950/40 text-cyan-400 font-extrabold text-xs rounded border border-cyan-850">
+            L3 & L4
+          </div>
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 leading-none">OSI Layers</div>
+            <div className="text-[9px] text-cyan-400 font-mono mt-0.5">Network & Transport</div>
+          </div>
+        </div>
+      </div>
+
+      {/* OSI Model Mapping Educational Banner */}
+      <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3">
+        <span className="text-cyan-400 font-bold shrink-0 text-xs mt-0.5">ℹ️</span>
+        <div className="text-xs text-zinc-400 leading-relaxed">
+          <span className="font-bold text-white">OSI Model Alignment:</span> WireGuard encapsulates and encrypts payload packets inside UDP datagrams at <span className="text-cyan-300 font-semibold">Layer 4 (Transport)</span> using port 13231/13232, while establishing a virtual point-to-point tunnel interface at <span className="text-cyan-300 font-semibold">Layer 3 (Network)</span> with dedicated subnets (e.g. 10.50.0.0/24) and static Cryptokey routes.
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">

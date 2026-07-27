@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Server, Users, UserPlus, Trash2, Key, Copy, CheckCircle } from 'lucide-react';
+import { Server, Users, UserPlus, Trash2, Key, Copy, CheckCircle, Info } from 'lucide-react';
 import { DHCPLease } from '../types';
 
 export default function DHCPServer() {
@@ -23,12 +23,18 @@ export default function DHCPServer() {
     e.preventDefault();
     if (!form.hostname || !form.macAddress || !form.ipAddress) return;
 
+    // Ensure comment has static-related prefix/suffix if empty, or enforce a standard comment
+    const rawComment = form.comment.trim();
+    const finalComment = rawComment
+      ? (rawComment.toLowerCase().includes('static') ? rawComment : `Static lease: ${rawComment}`)
+      : 'Static lease: Custom reservation';
+
     const newLease: DHCPLease = {
       id: Date.now().toString(),
       hostname: form.hostname,
       macAddress: form.macAddress.toUpperCase(),
       ipAddress: form.ipAddress,
-      comment: form.comment || 'Custom static lease reservation',
+      comment: finalComment,
       active: true
     };
 
@@ -55,7 +61,7 @@ export default function DHCPServer() {
 # Static IP Reservations (Static Leases Table)\n`;
 
     leases.forEach(lease => {
-      if (lease.comment && lease.comment.includes('Static')) {
+      if (lease.comment && lease.comment.toLowerCase().includes('static')) {
         script += `/ip dhcp-server lease add mac-address=${lease.macAddress} address=${lease.ipAddress} client-id=${lease.hostname} comment="${lease.comment}"\n`;
       }
     });
@@ -71,14 +77,35 @@ export default function DHCPServer() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-        <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-          <Server className="text-cyan-400 w-5 h-5" />
-          DHCP Server & Static Address Leases
-        </h2>
-        <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-          Configure central dynamic address assignment for VLAN 10 (Main) and VLAN 20 (Guest) subnets. Add custom MAC-to-IP reservations below to guarantee persistent IP addressing for local printers, file servers, and key machines.
-        </p>
+      <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+            <Server className="text-cyan-400 w-5 h-5" />
+            DHCP Server & Static Address Leases
+          </h2>
+          <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+            Configure central dynamic address assignment for VLAN 10 (Main) and VLAN 20 (Guest) subnets. Add custom MAC-to-IP reservations below to guarantee persistent IP addressing for local printers, file servers, and key machines.
+          </p>
+        </div>
+
+        {/* Educational OSI Mapping Badge */}
+        <div className="bg-cyan-500/10 border border-cyan-500/25 px-4 py-2 rounded-xl shrink-0 flex items-center gap-2.5">
+          <div className="p-1.5 bg-cyan-950/40 text-cyan-400 font-extrabold text-xs rounded border border-cyan-850">
+            L3 & L7
+          </div>
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 leading-none">OSI Layers</div>
+            <div className="text-[9px] text-cyan-400 font-mono mt-0.5">Network & Application</div>
+          </div>
+        </div>
+      </div>
+
+      {/* OSI Model Mapping Educational Banner */}
+      <div className="bg-[#0a0a0f] border border-[#141422] p-4 rounded-xl flex items-start gap-3">
+        <Info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
+        <div className="text-xs text-zinc-400 leading-relaxed">
+          <span className="font-bold text-white">OSI Model Alignment:</span> DHCP relies on <span className="text-cyan-300 font-semibold">Layer 7 (Application)</span> queries encapsulated in <span className="text-cyan-300 font-semibold">Layer 4 (UDP)</span> datagrams on ports 67/68 to assign <span className="text-cyan-300 font-semibold">Layer 3 (Network) IP configurations</span> (addresses, subnet masks, gateways) and DNS servers, matching them uniquely to client <span className="text-cyan-300 font-semibold">Layer 2 (Data Link) MAC addresses</span>.
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
@@ -106,33 +133,37 @@ export default function DHCPServer() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-900/30">
-                {leases.map((lease) => (
-                  <tr key={lease.id} className="hover:bg-zinc-950/40 transition-colors">
-                    <td className="py-3 font-bold text-white">{lease.hostname}</td>
-                    <td className="py-3 font-mono text-zinc-500 uppercase">{lease.macAddress}</td>
-                    <td className="py-3 font-mono text-cyan-400">{lease.ipAddress}</td>
-                    <td className="py-3">
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
-                        lease.ipAddress.startsWith('192.168.10') 
-                          ? 'bg-emerald-500/10 border border-emerald-900/30 text-emerald-400' 
-                          : 'bg-amber-500/10 border border-amber-900/30 text-amber-500'
-                      }`}>
-                        {lease.ipAddress.startsWith('192.168.10') ? 'VLAN 10' : 'VLAN 20'}
-                      </span>
-                    </td>
-                    <td className="py-3 text-zinc-400 italic text-[11px]">{lease.comment}</td>
-                    <td className="py-3 text-right">
-                      {lease.comment?.includes('Static') && (
-                        <button 
-                          onClick={() => handleDeleteLease(lease.id)}
-                          className="p-1 hover:text-red-400 text-zinc-600 transition-colors"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {leases.map((lease) => {
+                  const isStatic = lease.comment?.toLowerCase().includes('static');
+                  return (
+                    <tr key={lease.id} className="hover:bg-zinc-950/40 transition-colors">
+                      <td className="py-3 font-bold text-white">{lease.hostname}</td>
+                      <td className="py-3 font-mono text-zinc-500 uppercase">{lease.macAddress}</td>
+                      <td className="py-3 font-mono text-cyan-400">{lease.ipAddress}</td>
+                      <td className="py-3">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                          lease.ipAddress.startsWith('192.168.10')
+                            ? 'bg-emerald-500/10 border border-emerald-900/30 text-emerald-400'
+                            : 'bg-amber-500/10 border border-amber-900/30 text-amber-500'
+                        }`}>
+                          {lease.ipAddress.startsWith('192.168.10') ? 'VLAN 10' : 'VLAN 20'}
+                        </span>
+                      </td>
+                      <td className="py-3 text-zinc-400 italic text-[11px]">{lease.comment}</td>
+                      <td className="py-3 text-right">
+                        {isStatic && (
+                          <button
+                            onClick={() => handleDeleteLease(lease.id)}
+                            className="p-1 hover:text-red-400 text-zinc-600 transition-colors"
+                            title="Delete Static Lease"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -150,7 +181,7 @@ export default function DHCPServer() {
 
             <form onSubmit={handleAddLease} className="space-y-3">
               <div>
-                <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block mb-1">Hostname</label>
+                <label className="text-[10px] text-zinc-500 tracking-wider font-bold block mb-1 uppercase">Hostname</label>
                 <input 
                   type="text" 
                   value={form.hostname}
@@ -162,7 +193,7 @@ export default function DHCPServer() {
               </div>
 
               <div>
-                <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block mb-1">MAC Address</label>
+                <label className="text-[10px] text-zinc-500 tracking-wider font-bold block mb-1 uppercase">MAC Address</label>
                 <input 
                   type="text" 
                   value={form.macAddress}
@@ -174,7 +205,7 @@ export default function DHCPServer() {
               </div>
 
               <div>
-                <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block mb-1">IP Address Reservation</label>
+                <label className="text-[10px] text-zinc-500 tracking-wider font-bold block mb-1 uppercase">IP Address Reservation</label>
                 <input 
                   type="text" 
                   value={form.ipAddress}
@@ -186,7 +217,7 @@ export default function DHCPServer() {
               </div>
 
               <div>
-                <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block mb-1">Description</label>
+                <label className="text-[10px] text-zinc-500 tracking-wider font-bold block mb-1 uppercase">Description</label>
                 <input 
                   type="text" 
                   value={form.comment}
@@ -198,7 +229,7 @@ export default function DHCPServer() {
 
               <button 
                 type="submit"
-                className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs py-2 rounded-xl transition-colors shadow-lg shadow-cyan-900/20"
+                className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs py-2 rounded-xl transition-colors shadow-lg shadow-cyan-900/20 cursor-pointer"
               >
                 Create Static Reservation
               </button>
