@@ -151,28 +151,3 @@ export interface RoMONConfig {
   id?: string;
 }
 
-export interface DiscoveredDevice {
-  ip: string;
-  mac: string;
-  identity: string;
-  boardName: string;
-  version: string;
-  uptime: string;
-  interfaceName: string;
-  discoveryType: 'mndp' | 'arp';
-  vendor?: string;
-}
-
-export interface Adapter {
-  name: string;
-  type: 'ethernet' | 'usb-c-ethernet' | 'wifi' | 'virtual';
-  status: 'connected' | 'disconnected' | 'carrier_link_down';
-  speed: string;
-  mac: string;
-  ipv4: string;
-  gateway: string;
-  dhcpServer: string;
-  dns: string;
-  manufacturer: string;
-  chipset: string;
-}

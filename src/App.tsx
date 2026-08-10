@@ -27,7 +27,9 @@ import {
   ArrowRight,
   Radio,
   Lock,
-  Laptop
+  Laptop,
+  Download,
+  FileCode
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -49,11 +51,17 @@ import DHCPServer from './components/DHCPServer';
 import WireGuardVPN from './components/WireGuardVPN';
 import InterfaceMangle from './components/InterfaceMangle';
 import LocalAdapterMonitor from './components/LocalAdapterMonitor';
+import InterfaceTrafficChart, { InterfaceSparkline, TrafficDataPoint } from './components/InterfaceTrafficChart';
+import SNMPManager from './components/SNMPManager';
+import PingLatencyTool from './components/PingLatencyTool';
+import HardwareStressTest from './components/HardwareStressTest';
+import PacketSniffer from './components/PacketSniffer';
+import NetworkScannerAgentPlatform from './components/NetworkScannerAgentPlatform';
 
 export default function App() {
   // Navigation Menu tabs
   const [activeTab, setActiveTab] = useState<
-    'terminal' | 'topology' | 'capsman' | 'stp' | 'dhcp' | 'wireguard' | 'mangle' | 'interfaces' | 'ips' | 'nat' | 'filters' | 'simulator' | 'settings' | 'local-adapters'
+    'terminal' | 'topology' | 'capsman' | 'stp' | 'dhcp' | 'wireguard' | 'mangle' | 'interfaces' | 'ips' | 'nat' | 'filters' | 'simulator' | 'settings' | 'local-adapters' | 'stresstest' | 'packetsniffer' | 'netscanner'
   >('terminal');
 
   // Router Engine Simulated State - Prefilled with the user's modern RouterOS configuration!
@@ -116,6 +124,114 @@ export default function App() {
     srcInterface: 'vlan20-guest'
   });
   
+  const [selectedInterface, setSelectedInterface] = useState<string>('lte1');
+  const [activeSpike, setActiveSpike] = useState<'iperf' | 'streaming' | 'backup' | 'idle'>('idle');
+  const [isTrafficPaused, setIsTrafficPaused] = useState<boolean>(false);
+
+  const [trafficHistory, setTrafficHistory] = useState<Record<string, TrafficDataPoint[]>>(() => {
+    const initialHistory: Record<string, TrafficDataPoint[]> = {};
+    const baseSpeeds: Record<string, { rx: number; tx: number }> = {
+      'lte1': { rx: 124.5, tx: 42.1 },
+      'vlan10-main': { rx: 45.1, tx: 32.4 },
+      'vlan20-guest': { rx: 1.2, tx: 0.8 },
+      'bridge-vlan': { rx: 210.4, tx: 184.2 },
+      'ether1-wan': { rx: 0, tx: 0 }
+    };
+    
+    const now = Date.now();
+    ['lte1', 'vlan10-main', 'vlan20-guest', 'bridge-vlan', 'ether1-wan'].forEach(name => {
+      const base = baseSpeeds[name] || { rx: 10, tx: 10 };
+      const points: TrafficDataPoint[] = [];
+      for (let i = 25; i >= 0; i--) {
+        const factor = 0.85 + Math.random() * 0.3;
+        points.push({
+          rx: Math.max(0, base.rx * factor),
+          tx: Math.max(0, base.tx * factor),
+          time: new Date(now - i * 1000)
+        });
+      }
+      initialHistory[name] = points;
+    });
+    return initialHistory;
+  });
+
+  useEffect(() => {
+    if (isTrafficPaused) return;
+    const timer = setInterval(() => {
+      const now = new Date();
+      setTrafficHistory(prev => {
+        const updated = { ...prev };
+        
+        ['lte1', 'vlan10-main', 'vlan20-guest', 'bridge-vlan', 'ether1-wan'].forEach(name => {
+          let baseRx = 5;
+          let baseTx = 5;
+          
+          if (name === 'lte1') { baseRx = 124.5; baseTx = 42.1; }
+          else if (name === 'vlan10-main') { baseRx = 45.1; baseTx = 32.4; }
+          else if (name === 'vlan20-guest') { baseRx = 1.2; baseTx = 0.8; }
+          else if (name === 'bridge-vlan') { baseRx = 210.4; baseTx = 184.2; }
+          else if (name === 'ether1-wan') { baseRx = 0.5; baseTx = 0.2; }
+
+          // Apply spike modifiers if active
+          let multiplierRx = 1.0;
+          let multiplierTx = 1.0;
+          
+          if (activeSpike === 'iperf') {
+            if (name === selectedInterface || name === 'bridge-vlan' || name === 'lte1') {
+              multiplierRx = 3.5 + Math.random() * 1.5; // up to 5x
+              multiplierTx = 2.0 + Math.random() * 1.0;
+            }
+          } else if (activeSpike === 'streaming') {
+            if (name === selectedInterface) {
+              baseRx = 38.4;
+              baseTx = 1.8;
+            }
+          } else if (activeSpike === 'backup') {
+            if (name === selectedInterface) {
+              multiplierTx = 4.5 + Math.random() * 1.5;
+              baseRx = 3.1;
+            }
+          }
+
+          const factorRx = 0.85 + Math.random() * 0.3;
+          const factorTx = 0.85 + Math.random() * 0.3;
+
+          const nextRx = Math.max(0, baseRx * multiplierRx * factorRx);
+          const nextTx = Math.max(0, baseTx * multiplierTx * factorTx);
+
+          const currentPoints = prev[name] || [];
+          const nextPoints = [...currentPoints, { rx: nextRx, tx: nextTx, time: now }];
+          
+          updated[name] = nextPoints.slice(-30);
+        });
+
+        return updated;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [activeSpike, selectedInterface, isTrafficPaused]);
+
+  const getLatestRxTxText = (name: string) => {
+    const points = trafficHistory[name];
+    if (!points || points.length === 0) return { rx: '0 bps', tx: '0 bps', rxNum: 0, txNum: 0 };
+    const last = points[points.length - 1];
+    
+    const formatSpeed = (val: number) => {
+      if (val >= 1000) return `${(val/1000).toFixed(1)} Gbps`;
+      if (val >= 1) return `${val.toFixed(1)} Mbps`;
+      if (val > 0) return `${(val * 1000).toFixed(0)} Kbps`;
+      return '0 bps';
+    };
+    
+    return {
+      rx: formatSpeed(last.rx),
+      tx: formatSpeed(last.tx),
+      rxNum: last.rx,
+      txNum: last.tx
+    };
+  };
+
   const [simulationActive, setSimulationActive] = useState(false);
   const [simulationStep, setSimulationStep] = useState(0);
   const [simulationLogs, setSimulationLogs] = useState<string[]>([]);
@@ -234,6 +350,96 @@ export default function App() {
 
     addLog('System', 'All parsable commands simulated on virtual interface successfully.', 'info');
     setActiveTab('ips');
+  };
+
+  const handleExportConfigToRsc = () => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `RouterOS_Export_${timestamp}.rsc`;
+
+    let content = `# ====================================================================\n`;
+    content += `# RouterOS Terminal Export Script (.rsc)\n`;
+    content += `# Exported from RouterOS AI Assistant Terminal\n`;
+    content += `# Target Platform: MikroTik RouterOS v7.x\n`;
+    content += `# Generated On: ${new Date().toLocaleString()}\n`;
+    content += `# ====================================================================\n\n`;
+
+    content += `# --------------------------------------------------------------------\n`;
+    content += `# 1. INTERFACE CONFIGURATION\n`;
+    content += `# --------------------------------------------------------------------\n`;
+    content += `/interface\n`;
+    interfaces.forEach((i) => {
+      if (i.type === 'vlan') {
+        const vlanMatch = i.name.match(/\d+/);
+        const vlanId = vlanMatch ? vlanMatch[0] : '10';
+        content += `vlan add name="${i.name}" vlan-id=${vlanId} interface="bridge-vlan" comment="${i.comment || ''}"\n`;
+      } else {
+        content += `set [ find name="${i.name}" ] comment="${i.comment || ''}"\n`;
+      }
+    });
+
+    content += `\n# --------------------------------------------------------------------\n`;
+    content += `# 2. IP ADDRESS POOL & GATEWAYS\n`;
+    content += `# --------------------------------------------------------------------\n`;
+    content += `/ip address\n`;
+    ips.forEach((ip) => {
+      content += `add address="${ip.address}" network="${ip.network}" interface="${ip.interface}" comment="${ip.comment || ''}"\n`;
+    });
+
+    content += `\n# --------------------------------------------------------------------\n`;
+    content += `# 3. FIREWALL NAT RULES\n`;
+    content += `# --------------------------------------------------------------------\n`;
+    content += `/ip firewall nat\n`;
+    natRules.forEach((rule) => {
+      let cmd = `add chain="${rule.chain}" action="${rule.action}"`;
+      if (rule.outInterface) cmd += ` out-interface="${rule.outInterface}"`;
+      if (rule.inInterface) cmd += ` in-interface="${rule.inInterface}"`;
+      if (rule.protocol) cmd += ` protocol="${rule.protocol}"`;
+      if (rule.dstPort) cmd += ` dst-port=${rule.dstPort}`;
+      if (rule.toAddresses) cmd += ` to-addresses="${rule.toAddresses}"`;
+      if (rule.toPorts) cmd += ` to-ports="${rule.toPorts}"`;
+      if (rule.comment) cmd += ` comment="${rule.comment}"`;
+      content += `${cmd}\n`;
+    });
+
+    content += `\n# --------------------------------------------------------------------\n`;
+    content += `# 4. FIREWALL FILTER RULES\n`;
+    content += `# --------------------------------------------------------------------\n`;
+    content += `/ip firewall filter\n`;
+    filterRules.forEach((filter) => {
+      let cmd = `add chain="${filter.chain}" action="${filter.action}"`;
+      if (filter.protocol && filter.protocol !== 'any') cmd += ` protocol="${filter.protocol.toLowerCase()}"`;
+      if (filter.srcAddress) cmd += ` src-address="${filter.srcAddress}"`;
+      if (filter.dstAddress) cmd += ` dst-address="${filter.dstAddress}"`;
+      if (filter.dstPort) cmd += ` dst-port=${filter.dstPort}`;
+      if (filter.comment) cmd += ` comment="${filter.comment}"`;
+      content += `${cmd}\n`;
+    });
+
+    if (generatedResult?.commands && generatedResult.commands.length > 0) {
+      content += `\n# --------------------------------------------------------------------\n`;
+      content += `# 5. LATEST AI ASSISTANT COMPILED COMMANDS (${currentTask || 'Custom Request'})\n`;
+      content += `# --------------------------------------------------------------------\n`;
+      generatedResult.commands.forEach((c, idx) => {
+        content += `# [Step ${idx + 1}] ${c.explanation}\n`;
+        content += `${c.command}\n\n`;
+      });
+    }
+
+    content += `# ====================================================================\n`;
+    content += `# End of RouterOS Import Script\n`;
+    content += `# ====================================================================\n`;
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    addLog('System', `Exported RouterOS config script to file: ${filename}`, 'info');
   };
 
   const deleteIp = (id: string) => {
@@ -387,10 +593,31 @@ export default function App() {
             badge="Secure"
           />
           <NavItem 
+            icon={<Radio size={16} className="text-cyan-400" />} 
+            label="Network Scanner & Agent Platform" 
+            active={activeTab === 'netscanner'} 
+            onClick={() => setActiveTab('netscanner')} 
+            badge="Pro"
+          />
+          <NavItem 
             icon={<Layers size={16} />} 
             label="Packet Flow Trace" 
             active={activeTab === 'simulator'} 
             onClick={() => setActiveTab('simulator')} 
+          />
+          <NavItem 
+            icon={<Terminal size={16} className="text-cyan-400" />} 
+            label="Packet Sniffer & Frame Analysis" 
+            active={activeTab === 'packetsniffer'} 
+            onClick={() => setActiveTab('packetsniffer')} 
+            badge="Live"
+          />
+          <NavItem 
+            icon={<Activity size={16} />} 
+            label="Hardware Stress Test" 
+            active={activeTab === 'stresstest'} 
+            onClick={() => setActiveTab('stresstest')} 
+            badge="New"
           />
 
           <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-600 px-3 mt-4 mb-2">Topology & Wireless</p>
@@ -517,14 +744,24 @@ export default function App() {
           {/* TAB 1: AI ASSISTANT TERMINAL */}
           {activeTab === 'terminal' && (
             <div className="space-y-6">
-              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                  <Cpu className="text-cyan-400 w-5 h-5" />
-                  RouterOS Private AI Assistant Workspace
-                </h2>
-                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-                  Describe any networking or configuration goal. The sandbox assistant compiles the instructions and generates completely valid, copy-pasteable RouterOS commands. No external relay or insecure endpoints are used.
-                </p>
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    <Cpu className="text-cyan-400 w-5 h-5" />
+                    RouterOS Private AI Assistant Workspace
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                    Describe any networking or configuration goal. The sandbox assistant compiles the instructions and generates completely valid, copy-pasteable RouterOS commands. No external relay or insecure endpoints are used.
+                  </p>
+                </div>
+                <button
+                  onClick={handleExportConfigToRsc}
+                  className="px-4 py-2.5 text-xs font-bold rounded-xl bg-cyan-950/60 text-cyan-400 border border-cyan-800/60 hover:bg-cyan-900/80 hover:border-cyan-500/80 transition-all flex items-center gap-2 cursor-pointer shrink-0 shadow-[0_0_15px_rgba(6,182,212,0.12)]"
+                  title="Export current interfaces, IPs, firewall rules, and compiled commands to a downloadable .rsc file"
+                >
+                  <Download size={15} />
+                  Export RouterOS Script (.rsc)
+                </button>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -562,7 +799,7 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div className="pt-2">
+                    <div className="pt-2 space-y-2">
                       <button
                         onClick={handleGenerateScript}
                         disabled={isGenerating || !currentTask.trim()}
@@ -580,6 +817,15 @@ export default function App() {
                           </>
                         )}
                       </button>
+
+                      <button
+                        onClick={handleExportConfigToRsc}
+                        className="w-full bg-[#050508] hover:bg-zinc-900 text-zinc-300 border border-zinc-800 hover:border-cyan-500/50 font-semibold text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        title="Export interface, IP, firewall, and compiled AI script to a downloadable RouterOS import file (.rsc)"
+                      >
+                        <Download className="w-3.5 h-3.5 text-cyan-400" />
+                        Export RouterOS Config File (.rsc)
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -592,17 +838,27 @@ export default function App() {
                       animate={{ opacity: 1, y: 0 }}
                       className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl space-y-6"
                     >
-                      <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-900 pb-3 gap-3">
                         <div>
                           <span className="text-[9px] uppercase tracking-wider font-bold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">WinBox Compliant Output</span>
                           <h3 className="text-white text-sm font-bold mt-1.5">Generated Direct CLI Commands</h3>
                         </div>
-                        <button
-                          onClick={applyGeneratedCommandsToState}
-                          className="bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25 border border-emerald-500/25 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                        >
-                          Simulate in UI Tables
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleExportConfigToRsc}
+                            className="bg-cyan-950/50 text-cyan-400 hover:bg-cyan-900/60 border border-cyan-800/60 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                            title="Export full script file"
+                          >
+                            <Download size={13} />
+                            Export .rsc
+                          </button>
+                          <button
+                            onClick={applyGeneratedCommandsToState}
+                            className="bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25 border border-emerald-500/25 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                          >
+                            Simulate in UI Tables
+                          </button>
+                        </div>
                       </div>
 
                       <div className="space-y-4">
@@ -669,57 +925,127 @@ export default function App() {
           {/* TAB 8: PHYSICAL INTERFACES */}
           {activeTab === 'interfaces' && (
             <div className="space-y-6">
-              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                  <Activity className="text-cyan-400 w-5 h-5" />
-                  RouterOS Virtual Interfaces
-                </h2>
-                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-                  Real-time status tracking of physical and logical network boundaries in your setup, hosting active subnets and loop protections.
-                </p>
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    <Activity className="text-cyan-400 w-5 h-5 animate-pulse" />
+                    RouterOS Physical &amp; Virtual Interfaces
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                    Real-time status tracking of physical and logical network boundaries in your setup. Click on any interface in the table below to inspect its live D3.js throughput statistics.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => setActiveTab('packetsniffer')}
+                    className="px-3 py-1.5 text-xs font-bold rounded-xl bg-cyan-950/40 text-cyan-400 border border-cyan-800/60 hover:bg-cyan-900/60 transition-all flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.1)]"
+                  >
+                    <Layers size={13} />
+                    Launch Packet Sniffer
+                  </button>
+                  <div className="flex items-center gap-2 bg-[#0a0a14] border border-zinc-800 p-2.5 rounded-xl shrink-0">
+                    <div className={`w-2.5 h-2.5 rounded-full ${isTrafficPaused ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
+                    <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider">
+                      {isTrafficPaused ? 'Telemetry Frozen' : 'Telemetry Link Online'}
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              <div className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl">
+              {/* D3 Interactive Area Chart Panel */}
+              <InterfaceTrafficChart
+                interfaceName={selectedInterface}
+                data={trafficHistory[selectedInterface] || []}
+                onTriggerSpike={setActiveSpike}
+                activeSpike={activeSpike}
+                isPaused={isTrafficPaused}
+                onTogglePause={() => setIsTrafficPaused(p => !p)}
+              />
+
+              <div className="bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider block">Interface Traffic Matrix</span>
+                  <span className="text-[9px] font-semibold text-zinc-500 uppercase tracking-widest">Select any interface row below to graph</span>
+                </div>
+                
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-zinc-900 text-zinc-500 uppercase tracking-widest text-[9px] font-bold">
-                        <th className="pb-3">Port Name</th>
+                        <th className="pb-3 pl-2">Port Name</th>
                         <th className="pb-3">Media/Type</th>
                         <th className="pb-3 font-mono">Bound IP Address</th>
                         <th className="pb-3">Operational Status</th>
-                        <th className="pb-3">RX Traffic</th>
-                        <th className="pb-3">TX Traffic</th>
+                        <th className="pb-3">RX Traffic &amp; Sparkline</th>
+                        <th className="pb-3">TX Traffic &amp; Sparkline</th>
                         <th className="pb-3">Comment Description</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-900/30">
-                      {interfaces.map((intf) => (
-                        <tr key={intf.name} className="hover:bg-zinc-950/40 transition-colors">
-                          <td className="py-3.5 font-bold text-white">{intf.name}</td>
-                          <td className="py-3.5">
-                            <span className="text-[9px] font-bold uppercase tracking-wider bg-zinc-900 text-zinc-400 px-2 py-0.5 rounded border border-zinc-850">
-                              {intf.type}
-                            </span>
-                          </td>
-                          <td className="py-3.5 font-mono text-cyan-400">{intf.ipAddress}</td>
-                          <td className="py-3.5">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 w-fit ${
-                              intf.status === 'up' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-900/20' : 'bg-red-500/10 text-red-400 border border-red-900/20'
-                            }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${intf.status === 'up' ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                              {intf.status.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className="py-3.5 font-mono text-zinc-400">{intf.rxSpeed}</td>
-                          <td className="py-3.5 font-mono text-zinc-400">{intf.txSpeed}</td>
-                          <td className="py-3.5 text-zinc-500 italic text-[11px]">{intf.comment}</td>
-                        </tr>
-                      ))}
+                      {interfaces.map((intf) => {
+                        const isSelected = selectedInterface === intf.name;
+                        const latestSpeeds = getLatestRxTxText(intf.name);
+                        return (
+                          <tr 
+                            key={intf.name} 
+                            onClick={() => setSelectedInterface(intf.name)}
+                            className={`transition-colors cursor-pointer ${
+                              isSelected 
+                                ? 'bg-cyan-950/15 text-white font-medium border-l border-cyan-500' 
+                                : 'hover:bg-zinc-950/40 text-zinc-400'
+                            }`}
+                          >
+                            <td className="py-4 pl-2 font-bold flex items-center gap-2">
+                              {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping absolute" />}
+                              {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />}
+                              {!isSelected && <span className="w-1.5 h-1.5 rounded-full bg-zinc-700" />}
+                              <span className={isSelected ? 'text-cyan-400' : 'text-zinc-300'}>{intf.name}</span>
+                            </td>
+                            <td className="py-4">
+                              <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
+                                isSelected ? 'bg-cyan-950/60 text-cyan-300 border-cyan-900' : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                              }`}>
+                                {intf.type}
+                              </span>
+                            </td>
+                            <td className="py-4 font-mono text-cyan-400">{intf.ipAddress}</td>
+                            <td className="py-4">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 w-fit ${
+                                intf.status === 'up' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-900/20' : 'bg-red-500/10 text-red-400 border border-red-900/20'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${intf.status === 'up' ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                                {intf.status.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="py-4">
+                              <div className="flex items-center gap-3">
+                                <span className="w-20 inline-block font-mono font-bold text-cyan-400">{latestSpeeds.rx}</span>
+                                <InterfaceSparkline 
+                                  data={trafficHistory[intf.name]?.map(p => p.rx) || []} 
+                                  color="#06b6d4" 
+                                />
+                              </div>
+                            </td>
+                            <td className="py-4">
+                              <div className="flex items-center gap-3">
+                                <span className="w-20 inline-block font-mono font-bold text-pink-400">{latestSpeeds.tx}</span>
+                                <InterfaceSparkline 
+                                  data={trafficHistory[intf.name]?.map(p => p.tx) || []} 
+                                  color="#ec4899" 
+                                />
+                              </div>
+                            </td>
+                            <td className="py-4 text-zinc-500 italic text-[11px]">{intf.comment}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               </div>
+
+              {/* SNMP Manager Section */}
+              <SNMPManager />
             </div>
           )}
 
@@ -1143,17 +1469,32 @@ export default function App() {
                   )}
                 </div>
               </div>
+
+              {/* Ping Latency Diagnostic Tool */}
+              <PingLatencyTool />
             </div>
           )}
 
           {/* TAB 12: PHYSICAL LOCAL ADAPTERS HUD */}
           {activeTab === 'local-adapters' && (
-            <LocalAdapterMonitor
-              addLog={addLog}
-              setIps={setIps}
-              setFilterRules={setFilterRules}
-              setNatRules={setNatRules}
-              setInterfaces={setInterfaces}
+            <LocalAdapterMonitor />
+          )}
+
+          {/* TAB: HARDWARE STRESS TEST */}
+          {activeTab === 'stresstest' && (
+            <HardwareStressTest />
+          )}
+
+          {/* TAB: PACKET SNIFFER & FRAME ANALYSIS */}
+          {activeTab === 'packetsniffer' && (
+            <PacketSniffer interfaces={interfaces.map(i => i.name)} />
+          )}
+
+          {activeTab === 'netscanner' && (
+            <NetworkScannerAgentPlatform 
+              ips={ips}
+              filterRules={filterRules}
+              onNavigateTab={(tab) => setActiveTab(tab as any)}
             />
           )}
 
