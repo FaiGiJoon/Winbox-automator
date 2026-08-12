@@ -560,6 +560,30 @@ export default function NetworkScannerAgentPlatform({
                   <RefreshCw size={14} className={isScanning ? 'animate-spin' : ''} />
                   {isScanning ? `Scanning Subnet (${scanProgress}%)...` : 'Run Network Scan'}
                 </button>
+
+                <button
+                  onClick={() => {
+                    if (devices.length === 0) return;
+                    const headers = ['IP_Address', 'MAC_Address', 'Vendor', 'Hostname', 'OS_Type', 'Identity', 'RTT_Ms', 'Discovery_Method'];
+                    const rows = devices.map(d => [
+                      d.ip, `"${d.mac}"`, `"${d.vendor}"`, `"${d.hostname}"`, `"${d.osType}"`, `"${d.identity || ''}"`, d.rttMs, d.discoveryMethod
+                    ]);
+                    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', `scanned_hosts_${selectedSubnet.replace(/\//g, '_')}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                  className="px-3.5 py-2 text-xs font-bold rounded-xl bg-zinc-900 text-zinc-300 border border-zinc-800 hover:border-cyan-500/50 transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="Download CSV report of discovered hosts"
+                >
+                  <Download size={14} />
+                  Export Hosts CSV
+                </button>
               </div>
 
             </div>
@@ -782,12 +806,36 @@ export default function NetworkScannerAgentPlatform({
                 onClick={() => setIsTorchRunning(!isTorchRunning)}
                 className={`px-4 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 ${
                   isTorchRunning 
-                    ? 'bg-purple-950/60 text-purple-300 border-purple-800/60' 
-                    : 'bg-zinc-900 text-zinc-400 border-zinc-800'
+                    ? 'bg-purple-950/60 text-purple-300 border-purple-800/60 shadow-[0_0_12px_rgba(168,85,247,0.15)]' 
+                    : 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60'
                 }`}
               >
-                {isTorchRunning ? <Pause size={13} /> : <Play size={13} />}
-                {isTorchRunning ? 'Pause Torch' : 'Start Torch'}
+                {isTorchRunning ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
+                {isTorchRunning ? 'Pause Torch' : 'Resume Torch'}
+              </button>
+
+              <button
+                onClick={() => {
+                  if (torchFlows.length === 0) return;
+                  const headers = ['Source_Socket', 'Destination_Socket', 'Protocol', 'RX_Bps', 'TX_Bps', 'PPS'];
+                  const rows = torchFlows.map(f => [
+                    `"${f.src}"`, `"${f.dst}"`, f.proto, f.rxBps, f.txBps, f.pps
+                  ]);
+                  const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.setAttribute('href', url);
+                  link.setAttribute('download', `torch_flows_${torchInterface}.csv`);
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-purple-950/40 text-purple-300 border border-purple-800/60 hover:bg-purple-900/50 transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Download Torch live flow matrix CSV report"
+              >
+                <Download size={13} />
+                Export Torch CSV
               </button>
             </div>
           </div>

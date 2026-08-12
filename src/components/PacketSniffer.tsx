@@ -47,9 +47,11 @@ export default function PacketSniffer({
   interfaces = ['vlan10-main', 'vlan20-guest', 'bridge-vlan', 'lte1', 'ether1-wan', 'wireguard1'] 
 }: PacketSnifferProps) {
   
-  // Capture Running State
-  const [isCapturing, setIsCapturing] = useState<boolean>(true);
+  // Capture Running State: 'running' | 'paused' | 'stopped'
+  const [captureMode, setCaptureMode] = useState<'running' | 'paused' | 'stopped'>('running');
+  const isCapturing = captureMode === 'running';
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState<boolean>(false);
   
   // Filter States
   const [selectedInterface, setSelectedInterface] = useState<string>('All');
@@ -472,33 +474,89 @@ export default function PacketSniffer({
 
   const selectedPacket = packets.find(p => p.id === selectedPacketId) || filteredPackets[filteredPackets.length - 1];
 
-  // Export handlers
+  // Export helper function
+  const downloadBlob = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const getTsString = () => new Date().toISOString().replace(/[:.]/g, '-');
+
+  // Export CSV
   const exportCSV = () => {
     if (packets.length === 0) return;
-    const headers = ['Frame_ID', 'Timestamp', 'Interface', 'Direction', 'Protocol', 'Src_IP', 'Src_Port', 'Dst_IP', 'Dst_Port', 'Length_Bytes', 'Info'];
+    const headers = ['Frame_ID', 'Timestamp', 'Interface', 'Direction', 'Protocol', 'Src_MAC', 'Dst_MAC', 'Src_IP', 'Src_Port', 'Dst_IP', 'Dst_Port', 'Length_Bytes', 'TTL', 'Flags', 'Is_Drop', 'Info'];
     const rows = packets.map(p => [
       p.id,
       `"${p.timestamp}"`,
       `"${p.interfaceName}"`,
       p.direction,
       p.protocol,
+      `"${p.macSrc}"`,
+      `"${p.macDst}"`,
       p.srcIp,
       p.srcPort,
       p.dstIp,
       p.dstPort,
       p.length,
+      p.ttl,
+      `"${p.flags || ''}"`,
+      p.isDrop ? 'TRUE' : 'FALSE',
       `"${p.info.replace(/"/g, '""')}"`
     ]);
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `packet_capture_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadBlob(csvContent, `packet_capture_${getTsString()}.csv`, 'text/csv;charset=utf-8;');
+  };
+
+  // Export JSON
+  const exportJSON = () => {
+    if (packets.length === 0) return;
+    const jsonContent = JSON.stringify(packets, null, 2);
+    downloadBlob(jsonContent, `packet_capture_${getTsString()}.json`, 'application/json');
+  };
+
+  // Export Wireshark Compatible Text / PCAP Trace
+  const exportWiresharkPCAP = () => {
+    if (packets.length === 0) return;
+    let textContent = `# RouterOS Packet Sniffer Wireshark Text Trace Dump\n`;
+    textContent += `# Generated: ${new Date().toISOString()}\n`;
+    textContent += `# Total Captured Frames: ${packets.length}\n`;
+    textContent += `# Importable into Wireshark / text2pcap\n\n`;
+
+    packets.forEach(p => {
+      textContent += `--------------------------------------------------------------------------------\n`;
+      textContent += `Frame ${p.id}: ${p.length} bytes on interface ${p.interfaceName} [${p.direction}]\n`;
+      textContent += `Arrival Time: ${p.timestamp} | Protocol: ${p.protocol} | TTL: ${p.ttl}\n`;
+      textContent += `Eth: ${p.macSrc} -> ${p.macDst} | IP: ${p.srcIp}:${p.srcPort} -> ${p.dstIp}:${p.dstPort}\n`;
+      if (p.isDrop) textContent += `[FIREWALL DROP RULE TRIGGERED]\n`;
+      textContent += `Info: ${p.info}\n\n`;
+      textContent += `Raw Hex Stream:\n${p.hexDump}\n\n`;
+    });
+
+    downloadBlob(textContent, `wireshark_trace_${getTsString()}.pcap.txt`, 'text/plain;charset=utf-8;');
+  };
+
+  // Export RouterOS Log Format
+  const exportRouterOSLog = () => {
+    if (packets.length === 0) return;
+    let logText = `/tool sniffer packet print detail\n`;
+    logText += `; RouterOS v7.13.5 Packet Sniffer Export - ${new Date().toLocaleString()}\n`;
+    logText += `; Captured frames: ${packets.length}\n\n`;
+
+    packets.forEach(p => {
+      logText += `time=${p.timestamp} num=${p.id} interface=${p.interfaceName} src-mac=${p.macSrc} dst-mac=${p.macDst} src-address=${p.srcIp}:${p.srcPort} dst-address=${p.dstIp}:${p.dstPort} protocol=${p.protocol.toLowerCase()} size=${p.length} ${p.isDrop ? 'action=drop' : 'action=accept'}\n`;
+      logText += `  payload: ${p.payloadPreview}\n\n`;
+    });
+
+    downloadBlob(logText, `routeros_sniffer_${getTsString()}.log`, 'text/plain;charset=utf-8;');
   };
 
   const copyWinboxCli = () => {
@@ -542,7 +600,7 @@ export default function PacketSniffer({
       {/* Top Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-zinc-900 pb-4">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Layers className="text-cyan-400 w-5 h-5 animate-pulse" />
             <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
               RouterOS Live Frame Sniffer & Wireshark Analyzer
@@ -550,6 +608,34 @@ export default function PacketSniffer({
             <span className="text-[9px] font-bold uppercase tracking-widest bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded">
               L2/L3 Promiscuous Mode
             </span>
+
+            {/* Prominent Visual Status Indicator Badge */}
+            {captureMode === 'running' && (
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold font-mono uppercase tracking-wider bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 px-2.5 py-0.5 rounded-full shadow-[0_0_12px_rgba(16,185,129,0.3)]">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                LIVE CAPTURING
+              </span>
+            )}
+
+            {captureMode === 'paused' && (
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold font-mono uppercase tracking-wider bg-amber-950/80 text-amber-300 border border-amber-500/50 px-2.5 py-0.5 rounded-full shadow-[0_0_12px_rgba(245,158,11,0.3)] animate-pulse">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                </span>
+                SNIFFER PAUSED
+              </span>
+            )}
+
+            {captureMode === 'stopped' && (
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold font-mono uppercase tracking-wider bg-red-950/80 text-red-300 border border-red-500/50 px-2.5 py-0.5 rounded-full shadow-[0_0_12px_rgba(239,68,68,0.2)]">
+                <span className="inline-block h-2 w-2 rounded-full bg-red-500"></span>
+                SNIFFER STOPPED
+              </span>
+            )}
           </div>
           <p className="text-xs text-zinc-400 leading-normal">
             Real-time frame capture simulation overlaid directly over interface bandwidth charts. Inspect source/destination headers and payload bytes.
@@ -557,19 +643,54 @@ export default function PacketSniffer({
         </div>
 
         {/* Action Controls */}
-        <div className="flex flex-wrap items-center gap-2">
-          {isCapturing ? (
+        <div className="flex flex-wrap items-center gap-2 relative">
+          {captureMode === 'running' && (
+            <>
+              <button
+                onClick={() => setCaptureMode('paused')}
+                className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-amber-950/40 text-amber-300 border border-amber-800/60 hover:bg-amber-900/50 transition-all flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(245,158,11,0.15)]"
+                title="Pause frame capture stream while keeping captured frames in memory"
+              >
+                <Pause size={13} fill="currentColor" />
+                Pause Sniffer
+              </button>
+              <button
+                onClick={() => setCaptureMode('stopped')}
+                className="px-3 py-1.5 text-xs font-bold rounded-xl bg-red-950/30 text-red-400 border border-red-900/50 hover:bg-red-950/60 transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Stop packet sniffer engine"
+              >
+                <Square size={13} fill="currentColor" />
+                Stop
+              </button>
+            </>
+          )}
+
+          {captureMode === 'paused' && (
+            <>
+              <button
+                onClick={() => setCaptureMode('running')}
+                className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900/50 transition-all flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.2)] animate-pulse"
+                title="Resume live frame capture stream"
+              >
+                <Play size={13} fill="currentColor" />
+                Resume Capture
+              </button>
+              <button
+                onClick={() => setCaptureMode('stopped')}
+                className="px-3 py-1.5 text-xs font-bold rounded-xl bg-red-950/30 text-red-400 border border-red-900/50 hover:bg-red-950/60 transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Stop packet sniffer engine"
+              >
+                <Square size={13} fill="currentColor" />
+                Stop
+              </button>
+            </>
+          )}
+
+          {captureMode === 'stopped' && (
             <button
-              onClick={() => setIsCapturing(false)}
-              className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-red-950/30 text-red-400 border border-red-900/50 hover:bg-red-950/60 transition-all flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(239,68,68,0.1)]"
-            >
-              <Pause size={13} fill="currentColor" />
-              Stop Sniffer
-            </button>
-          ) : (
-            <button
-              onClick={() => setIsCapturing(true)}
-              className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-emerald-950/30 text-emerald-400 border border-emerald-900/50 hover:bg-emerald-950/60 transition-all flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.1)]"
+              onClick={() => setCaptureMode('running')}
+              className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900/50 transition-all flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+              title="Start packet sniffer capture engine"
             >
               <Play size={13} fill="currentColor" />
               Start Capture
@@ -601,13 +722,69 @@ export default function PacketSniffer({
             Throughput Chart
           </button>
 
-          <button
-            onClick={exportCSV}
-            className="px-3 py-1.5 text-xs font-bold rounded-xl bg-cyan-950/20 text-cyan-400 border border-cyan-900/40 hover:bg-cyan-900/40 transition-all flex items-center gap-1.5 cursor-pointer"
-          >
-            <Download size={13} />
-            Export CSV
-          </button>
+          {/* Download Multi-Format Menu Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setDownloadMenuOpen(!downloadMenuOpen)}
+              className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-cyan-950/40 text-cyan-300 border border-cyan-800/60 hover:bg-cyan-900/50 transition-all flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.15)]"
+            >
+              <Download size={13} />
+              Download Capture
+              <ChevronDown size={12} className={`transition-transform ${downloadMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {downloadMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-[#0c0c14] border border-cyan-500/30 rounded-xl shadow-2xl p-1.5 z-50 space-y-1 font-mono text-xs">
+                <div className="px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500 border-b border-zinc-900">
+                  Select Export Format ({packets.length} frames)
+                </div>
+                
+                <button
+                  onClick={() => { exportCSV(); setDownloadMenuOpen(false); }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-cyan-950/60 text-cyan-200 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <BarChart2 size={13} className="text-cyan-400" />
+                  <div>
+                    <div className="font-bold">CSV Spreadsheet (.csv)</div>
+                    <div className="text-[9px] text-zinc-500">Excel / Pandas tabular format</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => { exportWiresharkPCAP(); setDownloadMenuOpen(false); }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-emerald-950/60 text-emerald-200 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <FileCode size={13} className="text-emerald-400" />
+                  <div>
+                    <div className="font-bold">Wireshark Trace (.pcap.txt)</div>
+                    <div className="text-[9px] text-zinc-500">text2pcap & hex dump format</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => { exportJSON(); setDownloadMenuOpen(false); }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-purple-950/60 text-purple-200 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Database size={13} className="text-purple-400" />
+                  <div>
+                    <div className="font-bold">JSON Frame Array (.json)</div>
+                    <div className="text-[9px] text-zinc-500">Full L2/L3/L4 structured JSON</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => { exportRouterOSLog(); setDownloadMenuOpen(false); }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-orange-950/60 text-orange-200 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Terminal size={13} className="text-orange-400" />
+                  <div>
+                    <div className="font-bold">RouterOS Sniffer Log (.log)</div>
+                    <div className="text-[9px] text-zinc-500">/tool sniffer print format</div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
 
           <button
             onClick={copyWinboxCli}
@@ -667,12 +844,18 @@ export default function PacketSniffer({
         <div className="bg-[#050508] border border-zinc-900 p-3 rounded-xl space-y-1">
           <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest block">Capture Status</span>
           <div className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${isCapturing ? 'bg-emerald-400 animate-ping' : 'bg-red-500'}`} />
-            <span className={`font-bold font-mono text-xs ${isCapturing ? 'text-emerald-400' : 'text-zinc-500'}`}>
-              {isCapturing ? 'STREAMING' : 'PAUSED'}
+            <span className={`w-2 h-2 rounded-full ${
+              captureMode === 'running' ? 'bg-emerald-400 animate-ping' : captureMode === 'paused' ? 'bg-amber-400' : 'bg-red-500'
+            }`} />
+            <span className={`font-bold font-mono text-xs ${
+              captureMode === 'running' ? 'text-emerald-400' : captureMode === 'paused' ? 'text-amber-400' : 'text-red-500'
+            }`}>
+              {captureMode === 'running' ? 'STREAMING' : captureMode === 'paused' ? 'PAUSED' : 'STOPPED'}
             </span>
           </div>
-          <span className="text-[9px] text-zinc-600 block">Rate: ~2.5 pkts/sec</span>
+          <span className="text-[9px] text-zinc-600 block">
+            {captureMode === 'running' ? 'Rate: ~2.5 pkts/sec' : captureMode === 'paused' ? `${packets.length} frames held` : 'Sniffer halted'}
+          </span>
         </div>
       </div>
 
@@ -843,6 +1026,73 @@ export default function PacketSniffer({
           </button>
         </div>
       </div>
+
+      {/* Live Status Alert Banner */}
+      {captureMode === 'running' && (
+        <div className="bg-emerald-950/20 border border-emerald-800/30 text-emerald-300 px-3.5 py-2 rounded-xl text-xs font-mono flex items-center justify-between gap-2 shadow-[0_0_15px_rgba(16,185,129,0.08)]">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+            <span className="font-bold uppercase tracking-wider text-emerald-400">Packet Sniffer Active</span>
+            <span className="text-zinc-400 hidden sm:inline">— Live promiscuous capture streaming active across router interfaces (~2.5 pkts/sec).</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCaptureMode('paused')}
+              className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-amber-950/60 text-amber-300 border border-amber-800/60 hover:bg-amber-900/60 transition-all flex items-center gap-1 cursor-pointer shrink-0"
+            >
+              <Pause size={11} fill="currentColor" />
+              Pause
+            </button>
+            <button
+              onClick={() => setCaptureMode('stopped')}
+              className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-red-950/60 text-red-300 border border-red-800/60 hover:bg-red-900/60 transition-all flex items-center gap-1 cursor-pointer shrink-0"
+            >
+              <Square size={11} fill="currentColor" />
+              Stop
+            </button>
+          </div>
+        </div>
+      )}
+
+      {captureMode === 'paused' && (
+        <div className="bg-amber-950/30 border border-amber-700/50 text-amber-300 px-3.5 py-2 rounded-xl text-xs font-mono flex items-center justify-between gap-2 shadow-[0_0_15px_rgba(245,158,11,0.12)]">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+            </span>
+            <span className="font-bold uppercase tracking-wider text-amber-300">Packet Sniffer Paused</span>
+            <span className="text-amber-400/80 hidden sm:inline">— Ingestion suspended. {packets.length} captured frames retained in buffer.</span>
+          </div>
+          <button
+            onClick={() => setCaptureMode('running')}
+            className="px-3 py-1 text-[11px] font-bold rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-700 hover:bg-emerald-900 transition-all flex items-center gap-1.5 cursor-pointer shrink-0 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+          >
+            <Play size={11} fill="currentColor" />
+            Resume Live Stream
+          </button>
+        </div>
+      )}
+
+      {captureMode === 'stopped' && (
+        <div className="bg-red-950/30 border border-red-800/50 text-red-300 px-3.5 py-2 rounded-xl text-xs font-mono flex items-center justify-between gap-2 shadow-[0_0_15px_rgba(239,68,68,0.12)]">
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-red-500 inline-block"></span>
+            <span className="font-bold uppercase tracking-wider text-red-300">Packet Sniffer Stopped</span>
+            <span className="text-red-400/80 hidden sm:inline">— Promiscuous capture offline. Re-arm capture engine to stream new frames.</span>
+          </div>
+          <button
+            onClick={() => setCaptureMode('running')}
+            className="px-3 py-1 text-[11px] font-bold rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-700 hover:bg-emerald-900 transition-all flex items-center gap-1.5 cursor-pointer shrink-0 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+          >
+            <Play size={11} fill="currentColor" />
+            Start Capture Engine
+          </button>
+        </div>
+      )}
 
       {/* Main Split Layout: Frame Capture Table + Packet Detail Inspector */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
