@@ -185,12 +185,12 @@ export default function HardwareStressTest() {
 
   // Terminal & Log stream States
   const [stressLogs, setStressLogs] = useState<string[]>([]);
-  const logsEndRef = useRef<HTMLDivElement>(null);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
 
   // Auto scroll logs
   useEffect(() => {
-    if (logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (logsContainerRef.current) {
+      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
     }
   }, [stressLogs]);
 
@@ -827,7 +827,7 @@ export default function HardwareStressTest() {
               RouterOS Real-Time Log Telemetry Stream
             </span>
 
-            <div className="bg-black border border-zinc-900 rounded p-2.5 font-mono text-[10px] leading-relaxed overflow-y-auto h-[120px] shadow-inner space-y-0.5">
+            <div ref={logsContainerRef} className="bg-black border border-zinc-900 rounded p-2.5 font-mono text-[10px] leading-relaxed overflow-y-auto h-[120px] shadow-inner space-y-0.5">
               {stressLogs.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center text-zinc-700 italic">
                   <span>No active logs. Click "Start Stress Simulation" above to launch RouterOS CPU stress loop.</span>
@@ -846,7 +846,6 @@ export default function HardwareStressTest() {
                   );
                 })
               )}
-              <div ref={logsEndRef} />
             </div>
           </div>
         </div>

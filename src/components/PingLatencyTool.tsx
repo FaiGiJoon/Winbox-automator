@@ -38,7 +38,7 @@ export default function PingLatencyTool() {
   const [logs, setLogs] = useState<string[]>([]);
   const seqRef = useRef(0);
   const intervalIdRef = useRef<NodeJS.Timeout | null>(null);
-  const logsEndRef = useRef<HTMLDivElement>(null);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
 
   // Quick preset targets for manual mode
   const manualPresets = [
@@ -109,8 +109,8 @@ export default function PingLatencyTool() {
 
   // Auto scroll terminal logs
   useEffect(() => {
-    if (logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (logsContainerRef.current) {
+      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
     }
   }, [logs]);
 
@@ -883,7 +883,7 @@ export default function PingLatencyTool() {
               RouterOS ICMP Ping Terminal Console
             </span>
 
-            <div className="bg-black border border-zinc-900 rounded p-2.5 font-mono text-[10px] leading-relaxed overflow-y-auto h-[110px] shadow-inner space-y-0.5">
+            <div ref={logsContainerRef} className="bg-black border border-zinc-900 rounded p-2.5 font-mono text-[10px] leading-relaxed overflow-y-auto h-[110px] shadow-inner space-y-0.5">
               {logs.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center text-zinc-700 italic">
                   <span>Ping session inactive. Click "Start Diagnostic" above to launch RouterOS probes.</span>
@@ -902,7 +902,6 @@ export default function PingLatencyTool() {
                   );
                 })
               )}
-              <div ref={logsEndRef} />
             </div>
           </div>
         </div>

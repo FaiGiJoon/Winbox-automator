@@ -48,9 +48,10 @@ export default function PacketSniffer({
 }: PacketSnifferProps) {
   
   // Capture Running State: 'running' | 'paused' | 'stopped'
-  const [captureMode, setCaptureMode] = useState<'running' | 'paused' | 'stopped'>('running');
+  const [captureMode, setCaptureMode] = useState<'running' | 'paused' | 'stopped'>('stopped');
   const isCapturing = captureMode === 'running';
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
+  const [isUserScrolledUp, setIsUserScrolledUp] = useState<boolean>(false);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState<boolean>(false);
   
   // Filter States
@@ -71,7 +72,7 @@ export default function PacketSniffer({
   // D3 Chart Ref & Data
   const svgRef = useRef<SVGSVGElement | null>(null);
   const graphContainerRef = useRef<HTMLDivElement | null>(null);
-  const tableEndRef = useRef<HTMLDivElement | null>(null);
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Stats Counters
   const [stats, setStats] = useState({
@@ -349,12 +350,12 @@ export default function PacketSniffer({
     };
   }, [isCapturing, activePreset]);
 
-  // Auto scroll table
+  // Auto scroll table container safely without hijacking main page scroll
   useEffect(() => {
-    if (autoScroll && tableEndRef.current) {
-      tableEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (autoScroll && !isUserScrolledUp && tableContainerRef.current) {
+      tableContainerRef.current.scrollTop = tableContainerRef.current.scrollHeight;
     }
-  }, [packets, autoScroll]);
+  }, [packets, autoScroll, isUserScrolledUp]);
 
   // Render D3 Overlay Chart
   useEffect(() => {
@@ -1098,13 +1099,59 @@ export default function PacketSniffer({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         
         {/* Left/Top: Live Packet Table */}
-        <div className="lg:col-span-7 bg-[#050508] border border-zinc-900 rounded-xl overflow-hidden flex flex-col h-[340px]">
+        <div className="lg:col-span-7 bg-[#050508] border border-zinc-900 rounded-xl overflow-hidden flex flex-col h-[340px] relative">
           <div className="px-3.5 py-2.5 bg-[#09090e] border-b border-zinc-900 flex items-center justify-between text-[10px] font-mono font-bold text-zinc-400">
-            <span>LIVE STREAMING CAPTURE ({filteredPackets.length} frames)</span>
-            <span>Click row to inspect hex header</span>
+            <div className="flex items-center gap-2">
+              <span>LIVE STREAMING CAPTURE ({filteredPackets.length} frames)</span>
+              {isUserScrolledUp && (
+                <button
+                  onClick={() => {
+                    setIsUserScrolledUp(false);
+                    if (tableContainerRef.current) {
+                      tableContainerRef.current.scrollTop = tableContainerRef.current.scrollHeight;
+                    }
+                  }}
+                  className="px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-700/60 hover:bg-cyan-900 transition-all text-[9px] cursor-pointer"
+                  title="Scroll down to newest packet"
+                >
+                  ↓ Jump to latest
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  const next = !autoScroll;
+                  setAutoScroll(next);
+                  if (next) {
+                    setIsUserScrolledUp(false);
+                    if (tableContainerRef.current) {
+                      tableContainerRef.current.scrollTop = tableContainerRef.current.scrollHeight;
+                    }
+                  }
+                }}
+                className={`px-2 py-0.5 rounded text-[9px] cursor-pointer border transition-colors ${
+                  autoScroll 
+                    ? 'bg-emerald-950/50 text-emerald-300 border-emerald-800/60' 
+                    : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                }`}
+                title="Toggle automatic scrolling to latest frames"
+              >
+                Auto-scroll: {autoScroll ? 'ON' : 'OFF'}
+              </button>
+              <span>Click row to inspect</span>
+            </div>
           </div>
 
-          <div className="overflow-y-auto flex-1 scrollbar-thin">
+          <div 
+            ref={tableContainerRef}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 40;
+              setIsUserScrolledUp(!isAtBottom);
+            }}
+            className="overflow-y-auto flex-1 scrollbar-thin"
+          >
             <table className="w-full text-left font-mono text-[11px] border-collapse">
               <thead className="sticky top-0 bg-[#07070c] border-b border-zinc-900 text-zinc-500 uppercase text-[9px] font-bold z-10">
                 <tr>
@@ -1151,7 +1198,6 @@ export default function PacketSniffer({
                     );
                   })
                 )}
-                <div ref={tableEndRef} />
               </tbody>
             </table>
           </div>

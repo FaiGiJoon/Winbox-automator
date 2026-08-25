@@ -171,7 +171,7 @@ export default function NetworkScannerAgentPlatform({
   // 2. TORCH TRAFFIC FLOW INSPECTOR STATE
   // ------------------------------------------------------------------
   const [torchInterface, setTorchInterface] = useState<string>('vlan10-main');
-  const [isTorchRunning, setIsTorchRunning] = useState<boolean>(true);
+  const [isTorchRunning, setIsTorchRunning] = useState<boolean>(false);
   const [torchFlows, setTorchFlows] = useState<any[]>([
     { id: 1, src: '192.168.10.45:54120', dst: '142.250.190.46:443', proto: 'TCP (HTTPS)', rxBps: 18450000, txBps: 2100000, pps: 1420 },
     { id: 2, src: '192.168.10.15:554', dst: '192.168.10.10:50004', proto: 'RTSP (Video Stream)', rxBps: 42000000, txBps: 850000, pps: 3410 },
@@ -270,12 +270,12 @@ export default function NetworkScannerAgentPlatform({
     `[${new Date().toLocaleTimeString()}] [Platform] 4 Microservice Agents attached and healthy.`
   ]);
 
-  // Auto-scroll platform log
-  const logEndRef = useRef<HTMLDivElement | null>(null);
+  // Auto-scroll platform log container
+  const logContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [platformLogs]);
 
@@ -989,11 +989,10 @@ export default function NetworkScannerAgentPlatform({
             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block font-mono">
               AGENT TERMINAL COMMUNICATION LOG Stream
             </span>
-            <div className="bg-black border border-zinc-900 p-3 rounded font-mono text-[10px] text-zinc-300 h-[120px] overflow-y-auto space-y-1">
+            <div ref={logContainerRef} className="bg-black border border-zinc-900 p-3 rounded font-mono text-[10px] text-zinc-300 h-[120px] overflow-y-auto space-y-1">
               {platformLogs.map((l, idx) => (
                 <div key={idx} className="text-zinc-300">{l}</div>
               ))}
-              <div ref={logEndRef} />
             </div>
           </div>
 

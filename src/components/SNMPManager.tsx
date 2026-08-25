@@ -92,7 +92,7 @@ export default function SNMPManager() {
   });
 
   const [isPolling, setIsPolling] = useState<boolean>(false);
-  const terminalEndRef = useRef<HTMLDivElement | null>(null);
+  const terminalContainerRef = useRef<HTMLDivElement | null>(null);
 
   const addLog = (type: 'tx' | 'rx' | 'info' | 'error', message: string) => {
     setLogs(prev => [...prev.slice(-49), {
@@ -103,8 +103,8 @@ export default function SNMPManager() {
   };
 
   useEffect(() => {
-    if (terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (terminalContainerRef.current) {
+      terminalContainerRef.current.scrollTop = terminalContainerRef.current.scrollHeight;
     }
   }, [logs]);
 
@@ -657,7 +657,7 @@ export default function SNMPManager() {
               </button>
             </div>
             
-            <div className="bg-[#050508]/95 border border-zinc-900 rounded-xl p-4 font-mono text-[11px] leading-relaxed overflow-y-auto max-h-[190px] h-[190px] shadow-inner select-all">
+            <div ref={terminalContainerRef} className="bg-[#050508]/95 border border-zinc-900 rounded-xl p-4 font-mono text-[11px] leading-relaxed overflow-y-auto max-h-[190px] h-[190px] shadow-inner select-all">
               {logs.map((log, index) => {
                 let textCol = 'text-zinc-400';
                 let tag = '[SYSTEM]';
@@ -681,7 +681,6 @@ export default function SNMPManager() {
                   </div>
                 );
               })}
-              <div ref={terminalEndRef} />
             </div>
           </div>
 
