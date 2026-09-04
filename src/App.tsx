@@ -25,6 +25,10 @@ import {
   Info,
   Layers,
   ArrowRight,
+  ArrowUp,
+  ArrowDown,
+  GripVertical,
+  ArrowUpDown,
   Radio,
   Lock,
   Laptop,
@@ -113,7 +117,18 @@ export default function App() {
   // Adding custom states manually
   const [addIpForm, setAddIpForm] = useState({ address: '', interface: 'vlan10-main', comment: '' });
   const [addNatForm, setAddNatForm] = useState<Partial<FirewallNATRule>>({ chain: 'srcnat', action: 'masquerade', outInterface: 'lte1' });
-  const [addFilterForm, setAddFilterForm] = useState<Partial<FirewallFilterRule>>({ chain: 'forward', action: 'drop', protocol: 'any' });
+  const [addFilterForm, setAddFilterForm] = useState<Partial<FirewallFilterRule>>({ 
+    chain: 'forward', 
+    action: 'drop', 
+    protocol: 'any',
+    srcAddress: '',
+    dstAddress: '',
+    comment: '' 
+  });
+
+  // Firewall Filter Rules Drag & Drop State
+  const [draggedRuleIndex, setDraggedRuleIndex] = useState<number | null>(null);
+  const [dragOverRuleIndex, setDragOverRuleIndex] = useState<number | null>(null);
 
   // Packet Simulator State - Expanded for sophisticated VLAN isolation checking
   const [simulatorInput, setSimulatorInput] = useState({
@@ -457,6 +472,65 @@ export default function App() {
     addLog('WinBox', `Deleted Filter Rule ${id}`, 'info');
   };
 
+  // Reorder Firewall Filter Rule by moving from one priority position to another
+  const moveFilterRule = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || toIndex < 0 || toIndex >= filterRules.length) return;
+    const rule = filterRules[fromIndex];
+    setFilterRules(prev => {
+      const updated = [...prev];
+      const [moved] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, moved);
+      return updated;
+    });
+    addLog(
+      'WinBox',
+      `Firewall rule priority updated: [${rule?.comment || rule?.id}] moved from #${fromIndex} to #${toIndex} (${toIndex < fromIndex ? 'Priority Elevated' : 'Priority Lowered'})`,
+      'info'
+    );
+  };
+
+  const handleRuleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedRuleIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index.toString());
+  };
+
+  const handleRuleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverRuleIndex !== index) {
+      setDragOverRuleIndex(index);
+    }
+  };
+
+  const handleRuleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedRuleIndex === null || draggedRuleIndex === targetIndex) {
+      setDraggedRuleIndex(null);
+      setDragOverRuleIndex(null);
+      return;
+    }
+    moveFilterRule(draggedRuleIndex, targetIndex);
+    setDraggedRuleIndex(null);
+    setDragOverRuleIndex(null);
+  };
+
+  const handleRuleDragEnd = () => {
+    setDraggedRuleIndex(null);
+    setDragOverRuleIndex(null);
+  };
+
+  const resetDefaultFilterRules = () => {
+    const defaults: FirewallFilterRule[] = [
+      { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway' },
+      { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward' },
+      { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)' },
+      { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports' }
+    ];
+    setFilterRules(defaults);
+    addLog('WinBox', 'Reset Firewall Filter Rules to factory default priority hierarchy.', 'info');
+  };
+
   const addManualIp = (e: React.FormEvent) => {
     e.preventDefault();
     if (!addIpForm.address) return;
@@ -479,11 +553,13 @@ export default function App() {
       chain: addFilterForm.chain as any || 'forward',
       action: addFilterForm.action as any || 'drop',
       protocol: addFilterForm.protocol === 'any' ? undefined : addFilterForm.protocol,
+      srcAddress: addFilterForm.srcAddress?.trim() || undefined,
+      dstAddress: addFilterForm.dstAddress?.trim() || undefined,
       comment: addFilterForm.comment || 'Custom user filter'
     };
     setFilterRules(prev => [...prev, newRule]);
-    setAddFilterForm({ chain: 'forward', action: 'drop', protocol: 'any', comment: '' });
-    addLog('WinBox', `Added Firewall rule: chain=${newRule.chain} action=${newRule.action}`, 'info');
+    setAddFilterForm({ chain: 'forward', action: 'drop', protocol: 'any', srcAddress: '', dstAddress: '', comment: '' });
+    addLog('WinBox', `Added Firewall rule at priority #${filterRules.length}: chain=${newRule.chain} action=${newRule.action}`, 'info');
   };
 
   const triggerPacketSimulation = () => {
@@ -515,32 +591,59 @@ export default function App() {
         }
 
         if (nextStep === 4) {
-          // Dynamic security checking representing VLAN isolation
+          // Dynamic security checking representing RouterOS sequential top-to-bottom rule evaluation
           let fate: 'accept' | 'drop' = 'accept';
-          let matchReason = 'No restrictive drop filters found for this interface path.';
+          let matchReason = 'No restrictive drop filters matched. Default RouterOS policy: ACCEPT.';
+          let matchedRuleIndex = -1;
 
-          // Isolation check for VLAN 20 -> VLAN 10
-          if (simulatorInput.srcIp.startsWith('192.168.20.') && simulatorInput.dstIp.startsWith('192.168.10.')) {
-            fate = 'drop';
-            matchReason = 'Matched Firewall Rule ID drop: [Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)]. Dropping IP frame immediately.';
-          } else {
-            for (const rule of filterRules) {
-              if (rule.action === 'drop' || rule.action === 'reject') {
-                const matchSubnet = rule.srcAddress && simulatorInput.srcIp.startsWith(rule.srcAddress.split('/')[0].slice(0, 10));
-                const matchProtocol = rule.protocol && rule.protocol.toLowerCase() === simulatorInput.protocol.toLowerCase();
-                const matchPort = rule.dstPort && rule.dstPort === simulatorInput.dstPort;
+          // Sequential First-Match Rule Engine
+          for (let i = 0; i < filterRules.length; i++) {
+            const rule = filterRules[i];
 
-                if (matchSubnet || matchProtocol || matchPort) {
-                  fate = 'drop';
-                  matchReason = `Matched Rule ID drop chain: [${rule.comment || 'Unnamed rule'}]. Dropping frame immediately.`;
-                  break;
-                }
+            // Protocol check
+            if (rule.protocol && rule.protocol !== 'any') {
+              if (rule.protocol.toLowerCase() !== simulatorInput.protocol.toLowerCase()) {
+                continue;
               }
             }
+
+            // Port check (for TCP/UDP)
+            if (rule.dstPort) {
+              if (rule.dstPort !== simulatorInput.dstPort) {
+                continue;
+              }
+            }
+
+            // Source IP / Subnet check
+            if (rule.srcAddress) {
+              const baseSubnet = rule.srcAddress.split('/')[0].split('.').slice(0, 3).join('.');
+              if (!simulatorInput.srcIp.startsWith(baseSubnet)) {
+                continue;
+              }
+            }
+
+            // Destination IP / Subnet check
+            if (rule.dstAddress) {
+              const baseSubnet = rule.dstAddress.split('/')[0].split('.').slice(0, 3).join('.');
+              if (!simulatorInput.dstIp.startsWith(baseSubnet)) {
+                continue;
+              }
+            }
+
+            // All criteria matched! First-match wins in RouterOS!
+            matchedRuleIndex = i;
+            if (rule.action === 'drop' || rule.action === 'reject') {
+              fate = 'drop';
+              matchReason = `Matched Rule #${i} [${rule.comment || rule.id}] (${rule.action.toUpperCase()}): Dropping frame immediately.`;
+            } else {
+              fate = 'accept';
+              matchReason = `Matched Rule #${i} [${rule.comment || rule.id}] (ACCEPT): Frame permitted through chain.`;
+            }
+            break; // Stop evaluating further rules
           }
 
           setSimulationDecision(fate);
-          const logMsg = `[Step 4] FIREWALL FORWARD / INPUT chain check: Decision: [${fate.toUpperCase()}]. ${matchReason}`;
+          const logMsg = `[Step 4] FIREWALL EVALUATION (Rule Priority #${matchedRuleIndex >= 0 ? matchedRuleIndex : 'Default'}): Decision: [${fate.toUpperCase()}]. ${matchReason}`;
           setSimulationLogs(logs => [...logs, logMsg]);
           return nextStep;
         }
@@ -1264,6 +1367,28 @@ export default function App() {
                     </div>
 
                     <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Source IP / Subnet (Optional)</label>
+                      <input 
+                        type="text"
+                        placeholder="e.g. 192.168.20.0/24 or any"
+                        value={addFilterForm.srcAddress || ''}
+                        onChange={(e) => setAddFilterForm(prev => ({ ...prev, srcAddress: e.target.value }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Destination IP / Subnet (Optional)</label>
+                      <input 
+                        type="text"
+                        placeholder="e.g. 192.168.10.0/24 or any"
+                        value={addFilterForm.dstAddress || ''}
+                        onChange={(e) => setAddFilterForm(prev => ({ ...prev, dstAddress: e.target.value }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
                       <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Comment / Label</label>
                       <input 
                         type="text"
@@ -1284,49 +1409,199 @@ export default function App() {
                 </div>
 
                 {/* Table */}
-                <div className="xl:col-span-8 bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="border-b border-zinc-900 text-zinc-500 uppercase tracking-widest text-[9px] font-bold">
-                          <th className="pb-3">Rule Order</th>
-                          <th className="pb-3">Chain</th>
-                          <th className="pb-3">Action</th>
-                          <th className="pb-3">Source IP</th>
-                          <th className="pb-3">Destination IP</th>
-                          <th className="pb-3">Protocol</th>
-                          <th className="pb-3">Comment / Label</th>
-                          <th className="pb-3 text-right">Remove</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-900/30">
-                        {filterRules.map((rule, index) => (
-                          <tr key={rule.id} className="hover:bg-zinc-950/40 transition-colors">
-                            <td className="py-3.5 text-zinc-500 font-bold">{index}</td>
-                            <td className="py-3.5 font-mono text-zinc-400">{rule.chain}</td>
-                            <td className="py-3.5">
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono uppercase ${
-                                rule.action === 'accept' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-900/20' : 'bg-red-500/10 text-red-400 border border-red-900/20'
-                              }`}>
-                                {rule.action}
-                              </span>
-                            </td>
-                            <td className="py-3.5 font-mono text-zinc-400">{rule.srcAddress || 'any'}</td>
-                            <td className="py-3.5 font-mono text-zinc-400">{rule.dstAddress || 'any'}</td>
-                            <td className="py-3.5 font-mono text-zinc-500">{rule.protocol || 'any'}</td>
-                            <td className="py-3.5 text-zinc-400 italic text-[11px]">{rule.comment}</td>
-                            <td className="py-3.5 text-right">
-                              <button 
-                                onClick={() => deleteFilter(rule.id)}
-                                className="p-1 text-zinc-600 hover:text-red-400 transition-colors cursor-pointer"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </td>
+                <div className="xl:col-span-8 bg-[#0a0a0f] border border-[#141422] p-6 rounded-2xl flex flex-col justify-between">
+                  <div>
+                    {/* Header with Priority Management instructions */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-zinc-900">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-xl bg-cyan-950/40 border border-cyan-800/40 text-cyan-400 shrink-0">
+                          <ArrowUpDown size={16} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                              Firewall Priority & Order Hierarchy
+                            </h4>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold">
+                              {filterRules.length} rules
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-zinc-500 mt-0.5">
+                            Rules evaluate top-to-bottom. Drag rows with the grip handle or use the <span className="text-zinc-300 font-mono font-bold">↑</span> / <span className="text-zinc-300 font-mono font-bold">↓</span> buttons to adjust priority.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={resetDefaultFilterRules}
+                          className="px-2.5 py-1 text-[10px] font-mono rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+                          title="Reset rule list to standard default configuration"
+                        >
+                          Reset Defaults
+                        </button>
+                        <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-800/50 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-[0_0_10px_rgba(6,182,212,0.1)]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                          Top First-Match
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-zinc-900 text-zinc-500 uppercase tracking-widest text-[9px] font-bold">
+                            <th className="pb-3 pl-2 w-8 text-center" title="Drag to reorder">Grip</th>
+                            <th className="pb-3 px-2">Priority & Move</th>
+                            <th className="pb-3">Chain</th>
+                            <th className="pb-3">Action</th>
+                            <th className="pb-3">Source IP</th>
+                            <th className="pb-3">Destination IP</th>
+                            <th className="pb-3">Protocol</th>
+                            <th className="pb-3">Comment / Label</th>
+                            <th className="pb-3 pr-2 text-right">Remove</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-900/30 font-sans">
+                          {filterRules.map((rule, index) => {
+                            const isBeingDragged = draggedRuleIndex === index;
+                            const isDragTarget = dragOverRuleIndex === index && draggedRuleIndex !== index;
+
+                            return (
+                              <tr 
+                                key={rule.id}
+                                draggable
+                                onDragStart={(e) => handleRuleDragStart(e, index)}
+                                onDragOver={(e) => handleRuleDragOver(e, index)}
+                                onDrop={(e) => handleRuleDrop(e, index)}
+                                onDragEnd={handleRuleDragEnd}
+                                className={`transition-all select-none ${
+                                  isBeingDragged 
+                                    ? 'opacity-30 bg-cyan-950/20 border-dashed border-cyan-500/80 scale-[0.99]' 
+                                    : isDragTarget
+                                    ? 'bg-cyan-950/40 border-t-2 border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.2)]'
+                                    : 'hover:bg-zinc-950/60'
+                                }`}
+                              >
+                                {/* Drag Handle */}
+                                <td className="py-3 pl-2 pr-1 text-center w-8">
+                                  <div 
+                                    className="p-1.5 text-zinc-600 hover:text-cyan-400 active:text-cyan-300 cursor-grab active:cursor-grabbing transition-colors inline-flex rounded hover:bg-zinc-900/80"
+                                    title="Click and drag to reorder rule priority"
+                                  >
+                                    <GripVertical size={14} />
+                                  </div>
+                                </td>
+
+                                {/* Priority Badge & Move Up/Down Controls */}
+                                <td className="py-3 px-2 whitespace-nowrap">
+                                  <div className="flex items-center gap-1.5">
+                                    <span 
+                                      className={`inline-flex items-center justify-center font-mono text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                        index === 0
+                                          ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.15)]'
+                                          : 'bg-zinc-900/90 text-zinc-400 border-zinc-800'
+                                      }`}
+                                      title={index === 0 ? "Highest priority: Evaluated first" : `Evaluated at position #${index}`}
+                                    >
+                                      #{index}
+                                      {index === 0 && (
+                                        <span className="ml-1 text-[8px] uppercase tracking-wider text-cyan-400 font-extrabold">
+                                          TOP
+                                        </span>
+                                      )}
+                                    </span>
+
+                                    {/* Move Buttons */}
+                                    <div className="flex items-center gap-0.5 ml-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => moveFilterRule(index, index - 1)}
+                                        disabled={index === 0}
+                                        title={index === 0 ? "Already at highest priority" : "Move Up (Increase Priority)"}
+                                        className={`p-1 rounded transition-all cursor-pointer ${
+                                          index === 0 
+                                            ? 'text-zinc-800 cursor-not-allowed opacity-20' 
+                                            : 'text-zinc-400 hover:text-cyan-300 hover:bg-zinc-900 border border-transparent hover:border-zinc-800'
+                                        }`}
+                                      >
+                                        <ArrowUp size={13} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => moveFilterRule(index, index + 1)}
+                                        disabled={index === filterRules.length - 1}
+                                        title={index === filterRules.length - 1 ? "Already at lowest priority" : "Move Down (Decrease Priority)"}
+                                        className={`p-1 rounded transition-all cursor-pointer ${
+                                          index === filterRules.length - 1 
+                                            ? 'text-zinc-800 cursor-not-allowed opacity-20' 
+                                            : 'text-zinc-400 hover:text-cyan-300 hover:bg-zinc-900 border border-transparent hover:border-zinc-800'
+                                        }`}
+                                      >
+                                        <ArrowDown size={13} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </td>
+
+                                {/* Chain */}
+                                <td className="py-3 font-mono text-zinc-300 font-semibold">{rule.chain}</td>
+
+                                {/* Action */}
+                                <td className="py-3">
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono uppercase ${
+                                    rule.action === 'accept' 
+                                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-900/30' 
+                                      : rule.action === 'reject'
+                                      ? 'bg-amber-500/10 text-amber-400 border border-amber-900/30'
+                                      : 'bg-red-500/10 text-red-400 border border-red-900/30'
+                                  }`}>
+                                    {rule.action}
+                                  </span>
+                                </td>
+
+                                {/* Source IP */}
+                                <td className="py-3 font-mono text-zinc-400">{rule.srcAddress || 'any'}</td>
+
+                                {/* Destination IP */}
+                                <td className="py-3 font-mono text-zinc-400">{rule.dstAddress || 'any'}</td>
+
+                                {/* Protocol */}
+                                <td className="py-3 font-mono text-zinc-500">{rule.protocol || 'any'}</td>
+
+                                {/* Comment / Label */}
+                                <td className="py-3 text-zinc-400 italic text-[11px] max-w-[220px] truncate" title={rule.comment}>
+                                  {rule.comment}
+                                </td>
+
+                                {/* Remove Action */}
+                                <td className="py-3 pr-2 text-right">
+                                  <button 
+                                    onClick={() => deleteFilter(rule.id)}
+                                    className="p-1.5 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                                    title="Delete rule"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Bottom summary bar */}
+                  <div className="mt-4 pt-3 border-t border-zinc-900/80 flex flex-col sm:flex-row items-center justify-between text-[11px] text-zinc-500 font-mono gap-2">
+                    <div className="flex items-center gap-2">
+                      <Shield size={12} className="text-cyan-400" />
+                      <span>RouterOS rule numbering: 0 (highest) to {filterRules.length - 1} (lowest)</span>
+                    </div>
+                    <span className="text-zinc-600 italic">
+                      Exported in exact priority sequence to .rsc configuration scripts
+                    </span>
                   </div>
                 </div>
               </div>
