@@ -1,6 +1,6 @@
 {
   "name": "RouterOS AI Companion",
-  "description": "Securely create, simulate, and manage MikroTik RouterOS configurations using a direct, private AI assistant.",
+  "description": "Securely create, simulate, and manage MikroTik RouterOS configurations with direct AI assistance, MCP JSON-RPC, and Hermes Agent integration.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

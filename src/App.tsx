@@ -33,7 +33,11 @@ import {
   Lock,
   Laptop,
   Download,
-  FileCode
+  FileCode,
+  Edit2,
+  Check,
+  X,
+  Bot
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -61,11 +65,12 @@ import PingLatencyTool from './components/PingLatencyTool';
 import HardwareStressTest from './components/HardwareStressTest';
 import PacketSniffer from './components/PacketSniffer';
 import NetworkScannerAgentPlatform from './components/NetworkScannerAgentPlatform';
+import HermesAgentConnector from './components/HermesAgentConnector';
 
 export default function App() {
   // Navigation Menu tabs
   const [activeTab, setActiveTab] = useState<
-    'terminal' | 'topology' | 'capsman' | 'stp' | 'dhcp' | 'wireguard' | 'mangle' | 'interfaces' | 'ips' | 'nat' | 'filters' | 'simulator' | 'settings' | 'local-adapters' | 'stresstest' | 'packetsniffer' | 'netscanner'
+    'terminal' | 'hermes' | 'topology' | 'capsman' | 'stp' | 'dhcp' | 'wireguard' | 'mangle' | 'interfaces' | 'ips' | 'nat' | 'filters' | 'simulator' | 'settings' | 'local-adapters' | 'stresstest' | 'packetsniffer' | 'netscanner'
   >('terminal');
 
   // Router Engine Simulated State - Prefilled with the user's modern RouterOS configuration!
@@ -129,6 +134,10 @@ export default function App() {
   // Firewall Filter Rules Drag & Drop State
   const [draggedRuleIndex, setDraggedRuleIndex] = useState<number | null>(null);
   const [dragOverRuleIndex, setDragOverRuleIndex] = useState<number | null>(null);
+
+  // Firewall Filter Rules Inline Comment Editing State
+  const [editingRuleCommentId, setEditingRuleCommentId] = useState<string | null>(null);
+  const [editingRuleCommentText, setEditingRuleCommentText] = useState<string>('');
 
   // Packet Simulator State - Expanded for sophisticated VLAN isolation checking
   const [simulatorInput, setSimulatorInput] = useState({
@@ -520,6 +529,30 @@ export default function App() {
     setDragOverRuleIndex(null);
   };
 
+  // Inline Comment Editing Handlers
+  const startEditingComment = (rule: FirewallFilterRule) => {
+    setEditingRuleCommentId(rule.id);
+    setEditingRuleCommentText(rule.comment || '');
+  };
+
+  const saveEditingComment = (ruleId: string) => {
+    const trimmed = editingRuleCommentText.trim();
+    const targetRule = filterRules.find(r => r.id === ruleId);
+    setFilterRules(prev => prev.map(r => r.id === ruleId ? { ...r, comment: trimmed || undefined } : r));
+    setEditingRuleCommentId(null);
+    setEditingRuleCommentText('');
+    addLog(
+      'WinBox', 
+      `Updated comment on Firewall filter rule [${targetRule?.chain} ${targetRule?.action}]: "${trimmed || '(cleared)'}"`, 
+      'info'
+    );
+  };
+
+  const cancelEditingComment = () => {
+    setEditingRuleCommentId(null);
+    setEditingRuleCommentText('');
+  };
+
   const resetDefaultFilterRules = () => {
     const defaults: FirewallFilterRule[] = [
       { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway' },
@@ -694,6 +727,13 @@ export default function App() {
             active={activeTab === 'terminal'} 
             onClick={() => setActiveTab('terminal')} 
             badge="Secure"
+          />
+          <NavItem 
+            icon={<Bot size={16} className="text-cyan-400" />} 
+            label="Hermes / OpenClaw Agent" 
+            active={activeTab === 'hermes'} 
+            onClick={() => setActiveTab('hermes')} 
+            badge="MCP"
           />
           <NavItem 
             icon={<Radio size={16} className="text-cyan-400" />} 
@@ -1005,6 +1045,18 @@ export default function App() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* TAB: HERMES AGENT & OPENCLAW CONNECTOR */}
+          {activeTab === 'hermes' && (
+            <HermesAgentConnector
+              filterRules={filterRules}
+              setFilterRules={setFilterRules}
+              ips={ips}
+              interfaces={interfaces}
+              natRules={natRules}
+              addLog={addLog}
+            />
           )}
 
           {/* TAB 2: NETWORK TOPOLOGY */}
@@ -1471,8 +1523,11 @@ export default function App() {
                             return (
                               <tr 
                                 key={rule.id}
-                                draggable
-                                onDragStart={(e) => handleRuleDragStart(e, index)}
+                                draggable={editingRuleCommentId === null}
+                                onDragStart={(e) => {
+                                  if (editingRuleCommentId !== null) return;
+                                  handleRuleDragStart(e, index);
+                                }}
                                 onDragOver={(e) => handleRuleDragOver(e, index)}
                                 onDrop={(e) => handleRuleDrop(e, index)}
                                 onDragEnd={handleRuleDragEnd}
@@ -1571,8 +1626,78 @@ export default function App() {
                                 <td className="py-3 font-mono text-zinc-500">{rule.protocol || 'any'}</td>
 
                                 {/* Comment / Label */}
-                                <td className="py-3 text-zinc-400 italic text-[11px] max-w-[220px] truncate" title={rule.comment}>
-                                  {rule.comment}
+                                <td className="py-2.5 px-2 text-[11px] min-w-[200px] max-w-[320px]">
+                                  {editingRuleCommentId === rule.id ? (
+                                    <div 
+                                      className="flex items-center gap-1.5"
+                                      onClick={(e) => e.stopPropagation()}
+                                      onMouseDown={(e) => e.stopPropagation()}
+                                    >
+                                      <input
+                                        type="text"
+                                        autoFocus
+                                        value={editingRuleCommentText}
+                                        onChange={(e) => setEditingRuleCommentText(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            saveEditingComment(rule.id);
+                                          } else if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            cancelEditingComment();
+                                          }
+                                        }}
+                                        placeholder="Add comment (e.g. Isolate IoT)..."
+                                        className="w-full bg-[#050508] border border-cyan-500/80 rounded-lg px-2.5 py-1 text-xs text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-cyan-400 font-sans shadow-[0_0_10px_rgba(6,182,212,0.15)]"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => saveEditingComment(rule.id)}
+                                        title="Save comment (Enter)"
+                                        className="p-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 transition-colors shrink-0 cursor-pointer"
+                                      >
+                                        <Check size={13} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={cancelEditingComment}
+                                        title="Cancel (Esc)"
+                                        className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 border border-zinc-700 transition-colors shrink-0 cursor-pointer"
+                                      >
+                                        <X size={13} />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div 
+                                      className="group/comment flex items-center justify-between gap-2 cursor-pointer py-1 px-2 -mx-1 rounded-lg hover:bg-zinc-900/80 border border-transparent hover:border-zinc-800/80 transition-all"
+                                      onClick={() => startEditingComment(rule)}
+                                      title="Click to edit rule comment"
+                                    >
+                                      <span 
+                                        className={`italic truncate max-w-[260px] ${
+                                          rule.comment ? 'text-zinc-300' : 'text-zinc-600 font-normal'
+                                        }`}
+                                      >
+                                        {rule.comment || 'Click to add comment...'}
+                                      </span>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <span className="opacity-0 group-hover/comment:opacity-100 text-[9px] text-zinc-500 font-mono transition-opacity">
+                                          edit
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            startEditingComment(rule);
+                                          }}
+                                          className="p-1 text-zinc-500 hover:text-cyan-300 rounded hover:bg-zinc-800/80 transition-all cursor-pointer opacity-40 group-hover/comment:opacity-100"
+                                          title="Edit comment"
+                                        >
+                                          <Edit2 size={11} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
                                 </td>
 
                                 {/* Remove Action */}

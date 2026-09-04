@@ -3,13 +3,28 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { registerAgentConnector } from "./server/agent-connector";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 
+// Enable CORS for external Hermes Agent / OpenClaw local processes
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json());
+
+// Register Hermes Agent & Model Context Protocol (MCP) server endpoints
+registerAgentConnector(app);
 
 // Initialize server-side Gemini client
 const ai = new GoogleGenAI({
