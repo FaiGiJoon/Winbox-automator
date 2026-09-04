@@ -505,6 +505,32 @@ export function registerAgentConnector(app: Express) {
     }
   });
 
+  // Delete rule REST endpoint
+  app.post('/api/agent/rules/delete', (req: Request, res: Response) => {
+    try {
+      const result = executeMcpTool('delete_firewall_rule', req.body);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Interface statistics REST endpoint
+  app.get('/api/agent/interfaces/stats', (req: Request, res: Response) => {
+    res.json({
+      status: 'success',
+      interfaces: routerState.interfaces.map(iface => ({
+        id: iface.id,
+        name: iface.name,
+        type: iface.type,
+        status: iface.status,
+        rxRate: `${(Math.random() * 4 + 0.5).toFixed(2)} Mbps`,
+        txRate: `${(Math.random() * 2 + 0.2).toFixed(2)} Mbps`,
+        packets: Math.floor(Math.random() * 50000 + 12000)
+      }))
+    });
+  });
+
   // Simulate packet REST endpoint
   app.post('/api/agent/simulate', (req: Request, res: Response) => {
     try {
@@ -591,6 +617,21 @@ endpoints:
       dstIp: "dstIp"
       protocol: "protocol"
       dstPort: "dstPort"
+
+  delete_firewall_rule:
+    path: "/api/agent/rules/delete"
+    method: "POST"
+    description: "Delete a firewall filter rule by ID or priority index"
+    headers:
+      Content-Type: "application/json"
+    body_params:
+      ruleId: "ruleId"
+      priorityIndex: "priorityIndex"
+
+  get_interface_stats:
+    path: "/api/agent/interfaces/stats"
+    method: "GET"
+    description: "Query interface traffic rates, link states, and packet statistics"
 `;
     res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
     res.send(yaml);

@@ -22,6 +22,7 @@ import {
   Network
 } from 'lucide-react';
 import { FirewallFilterRule, IPAddressConfig, InterfaceState, FirewallNATRule } from '../types';
+import HermesToolYamlGenerator from './HermesToolYamlGenerator';
 
 interface HermesAgentConnectorProps {
   filterRules: FirewallFilterRule[];
@@ -427,19 +428,35 @@ rl.on('line', async (line) => {
           </div>
 
           <div className="bg-[#050508] border border-zinc-900 rounded-xl p-3 flex items-center justify-between">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-zinc-500 block">Hermes Tool Manifest</span>
-              <code className="text-xs text-zinc-300 font-mono">/api/hermes/tool.yaml</code>
-            </div>
-            <a
-              href="/api/hermes/tool.yaml"
-              target="_blank"
-              rel="noreferrer"
-              className="p-1.5 text-zinc-500 hover:text-cyan-300 rounded hover:bg-zinc-900 transition-colors"
-              title="Open Manifest"
+            <div
+              className="cursor-pointer group"
+              onClick={() => setActiveSetupTab('tool-yaml')}
+              title="Click to open JSON & tool.yaml Generator"
             >
-              <ExternalLink size={14} />
-            </a>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] uppercase font-bold text-zinc-500 block">Hermes Tool Manifest</span>
+                <span className="text-[9px] font-mono font-bold text-cyan-400 bg-cyan-950/60 px-1 rounded">Generator</span>
+              </div>
+              <code className="text-xs text-zinc-300 group-hover:text-cyan-300 font-mono transition-colors">/api/hermes/tool.yaml</code>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setActiveSetupTab('tool-yaml')}
+                className="p-1.5 text-zinc-500 hover:text-cyan-300 rounded hover:bg-zinc-900 transition-colors cursor-pointer"
+                title="Configure and Generate tool.yaml"
+              >
+                <Code2 size={14} />
+              </button>
+              <a
+                href="/api/hermes/tool.yaml"
+                target="_blank"
+                rel="noreferrer"
+                className="p-1.5 text-zinc-500 hover:text-cyan-300 rounded hover:bg-zinc-900 transition-colors"
+                title="Open Raw Manifest"
+              >
+                <ExternalLink size={14} />
+              </a>
+            </div>
           </div>
 
           <div className="bg-[#050508] border border-zinc-900 rounded-xl p-3 flex items-center justify-between">
@@ -611,7 +628,7 @@ rl.on('line', async (line) => {
             <div className="flex flex-wrap gap-1.5 p-1 bg-[#050508] border border-zinc-900 rounded-xl">
               {[
                 { id: 'mcp', label: '1. MCP Server', subtitle: 'config.yaml' },
-                { id: 'tool-yaml', label: '2. Tool Manifest', subtitle: 'tool.yaml' },
+                { id: 'tool-yaml', label: '2. tool.yaml Generator', subtitle: 'JSON Utility & YAML' },
                 { id: 'skill', label: '3. Skill Package', subtitle: 'SKILL.md' },
                 { id: 'bridge', label: '4. CLI Bridge', subtitle: 'Stdio bridge' }
               ].map((tab) => (
@@ -674,38 +691,9 @@ rl.on('line', async (line) => {
               </div>
             )}
 
-            {/* Tab 2: tool.yaml HTTP Manifest */}
+            {/* Tab 2: tool.yaml HTTP Manifest & JSON Generator Utility */}
             {activeSetupTab === 'tool-yaml' && (
-              <div className="space-y-4 text-xs">
-                <p className="text-zinc-400 text-[11px]">
-                  Hermes Agent supports native HTTP API tools. Place this manifest at <code className="text-zinc-200 font-mono">~/.hermes/tools/routeros/tool.yaml</code>.
-                </p>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-[11px] text-zinc-400">
-                    <span>File: <code className="text-zinc-200 font-mono">~/.hermes/tools/routeros/tool.yaml</code></span>
-                    <div className="flex items-center gap-3">
-                      <a
-                        href="/api/hermes/tool.yaml"
-                        download="tool.yaml"
-                        className="text-zinc-400 hover:text-zinc-200 flex items-center gap-1 cursor-pointer"
-                      >
-                        <Download size={12} /> Download
-                      </a>
-                      <button
-                        onClick={() => handleCopy(toolYamlSnippet, 'tool-yaml-snippet')}
-                        className="flex items-center gap-1 text-cyan-400 hover:text-cyan-300 cursor-pointer"
-                      >
-                        {copiedId === 'tool-yaml-snippet' ? <Check size={12} /> : <Copy size={12} />}
-                        {copiedId === 'tool-yaml-snippet' ? 'Copied' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
-                  <pre className="bg-[#050508] border border-zinc-800 rounded-xl p-3 font-mono text-[11px] text-zinc-300 overflow-x-auto max-h-72">
-                    {toolYamlSnippet}
-                  </pre>
-                </div>
-              </div>
+              <HermesToolYamlGenerator baseUrl={baseUrl} />
             )}
 
             {/* Tab 3: SKILL.md Package */}
