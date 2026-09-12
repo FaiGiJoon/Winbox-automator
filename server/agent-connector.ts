@@ -71,6 +71,124 @@ export function addAgentLog(source: string, message: string, type: 'info' | 'war
   return entry;
 }
 
+// JSON-RPC 2.0 Traffic Log for OpenClaw & Hermes MCP debugging
+export interface JsonRpcTrafficLog {
+  id: string;
+  timestamp: string;
+  timeFormatted: string;
+  direction: 'incoming' | 'outgoing';
+  rpcId?: string | number | null;
+  method?: string;
+  toolName?: string;
+  durationMs?: number;
+  status: 'ok' | 'error' | 'notification' | 'pending';
+  errorCode?: number;
+  errorMessage?: string;
+  sourceIp?: string;
+  payload: any;
+  rawSize?: number;
+  summary: string;
+}
+
+const jsonRpcTrafficLogs: JsonRpcTrafficLog[] = [];
+const MAX_TRAFFIC_LOGS = 250;
+
+export function recordJsonRpcTraffic(log: Omit<JsonRpcTrafficLog, 'id' | 'timestamp' | 'timeFormatted' | 'rawSize'>): JsonRpcTrafficLog {
+  const now = new Date();
+  const timeFormatted = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+  const rawSize = JSON.stringify(log.payload || {}).length;
+
+  const entry: JsonRpcTrafficLog = {
+    id: `rpc-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    timestamp: now.toISOString(),
+    timeFormatted,
+    rawSize,
+    ...log
+  };
+
+  jsonRpcTrafficLogs.unshift(entry);
+  if (jsonRpcTrafficLogs.length > MAX_TRAFFIC_LOGS) {
+    jsonRpcTrafficLogs.pop();
+  }
+  return entry;
+}
+
+// Seed initial MCP handshake traffic for immediate visibility
+recordJsonRpcTraffic({
+  direction: 'incoming',
+  rpcId: 'req-001',
+  method: 'initialize',
+  status: 'ok',
+  sourceIp: '127.0.0.1 (stdio bridge)',
+  summary: '--> initialize [protocolVersion: 2024-11-05, client: OpenClaw-MikroTik/1.2.0]',
+  payload: {
+    jsonrpc: '2.0',
+    id: 'req-001',
+    method: 'initialize',
+    params: {
+      protocolVersion: '2024-11-05',
+      capabilities: { roots: { listChanged: true }, sampling: {} },
+      clientInfo: { name: 'OpenClaw-Agent', version: '1.2.0' }
+    }
+  }
+});
+
+recordJsonRpcTraffic({
+  direction: 'outgoing',
+  rpcId: 'req-001',
+  method: 'initialize',
+  status: 'ok',
+  durationMs: 1.25,
+  summary: '<-- 200 OK: Handshake accepted (serverInfo: mikrotik-routeros-mcp v1.0.0)',
+  payload: {
+    jsonrpc: '2.0',
+    id: 'req-001',
+    result: {
+      protocolVersion: '2024-11-05',
+      capabilities: { tools: {} },
+      serverInfo: { name: 'mikrotik-routeros-mcp', version: '1.0.0' }
+    }
+  }
+});
+
+recordJsonRpcTraffic({
+  direction: 'incoming',
+  rpcId: 'req-002',
+  method: 'tools/list',
+  status: 'ok',
+  sourceIp: '127.0.0.1 (stdio bridge)',
+  summary: '--> tools/list (Discover registered RouterOS capabilities)',
+  payload: {
+    jsonrpc: '2.0',
+    id: 'req-002',
+    method: 'tools/list',
+    params: {}
+  }
+});
+
+recordJsonRpcTraffic({
+  direction: 'outgoing',
+  rpcId: 'req-002',
+  method: 'tools/list',
+  status: 'ok',
+  durationMs: 0.85,
+  summary: '<-- 200 OK: Advertised 6 RouterOS tools (add_rule, reorder, simulate_trace, etc.)',
+  payload: {
+    jsonrpc: '2.0',
+    id: 'req-002',
+    result: {
+      tools: [
+        { name: 'get_router_state', description: 'Retrieve full RouterOS interfaces, IP addresses, and priority-ordered firewall rules' },
+        { name: 'add_firewall_filter_rule', description: 'Add a new firewall filter rule with chain, action, protocol, IP ranges, and priority index' },
+        { name: 'reorder_firewall_rule', description: 'Change the priority order index of an existing rule' },
+        { name: 'update_rule_comment', description: 'Update or annotate a firewall filter rule comment' },
+        { name: 'simulate_packet_trace', description: 'Simulate IP packet traversal and rule evaluation' },
+        { name: 'export_routeros_rsc', description: 'Generate the complete production RouterOS .rsc script' }
+      ]
+    }
+  }
+});
+
 export function evaluatePacketTrace(input: {
   srcIp: string;
   dstIp: string;
@@ -549,19 +667,202 @@ export function registerAgentConnector(app: Express) {
     res.send(script);
   });
 
-  // Hermes Agent tool.yaml Manifest
+  // Hermes Agent tool.yaml Manifest (Supports ?mode=strict and ?mode=flexible)
   app.get('/api/hermes/tool.yaml', (req: Request, res: Response) => {
     const host = req.get('host') || 'localhost:3000';
     const proto = req.protocol || 'http';
     const baseUrl = `${proto}://${host}`;
+    const mode = (req.query.mode as string)?.toLowerCase() === 'flexible' ? 'flexible' : 'strict';
 
-    const yaml = `# Hermes Agent Tool Manifest: MikroTik RouterOS
-# Save to: ~/.hermes/tools/routeros/tool.yaml
+    let yaml = '';
+    if (mode === 'strict') {
+      yaml = `# Hermes Agent Tool Manifest: MikroTik RouterOS
+# Destination: ~/.hermes/tools/routeros/tool.yaml
+# Schema Version: 2.0 (Strict Output Parsing Mode)
+# Target: Hermes Agent v0.5.0+ (Strict JSON Schema Validation)
+schema_version: "2.0"
 name: mikrotik_routeros
 description: "Direct programmatic management for MikroTik RouterOS: manage firewall filter priority, VLAN isolation, packet simulation, and configuration export."
 version: "1.0.0"
 type: "http"
 base_url: "${baseUrl}"
+
+output_parsing:
+  mode: "strict"
+  format: "json"
+  content_type: "application/json"
+  validate_schema: true
+  fail_on_unexpected: true
+  null_on_error: false
+  strip_nulls: true
+
+endpoints:
+  get_router_state:
+    path: "/api/agent/state"
+    method: "GET"
+    description: "Get full router configuration, interfaces, IPs, NAT rules, and priority-ordered firewall filter rules"
+    parameters:
+      type: "object"
+      properties: {}
+      additionalProperties: false
+    responses:
+      "200":
+        description: "Complete router state and rules array"
+
+  add_firewall_rule:
+    path: "/api/agent/rules/add"
+    method: "POST"
+    description: "Add a firewall filter rule with chain, action, protocol, addresses, ports, priority position, and comment"
+    headers:
+      Content-Type: "application/json"
+    parameters:
+      type: "object"
+      required:
+        - "chain"
+        - "action"
+      properties:
+        chain:
+          type: "string"
+          enum: ["forward", "input", "output"]
+          description: "Packet processing chain in RouterOS filter table"
+        action:
+          type: "string"
+          enum: ["accept", "drop", "reject", "log", "fasttrack-connection"]
+          description: "Rule action verdict"
+        protocol:
+          type: "string"
+          enum: ["tcp", "udp", "icmp", "any"]
+          description: "IP transport protocol"
+        srcAddress:
+          type: "string"
+          description: "Source IP or CIDR subnet (e.g. 192.168.20.0/24)"
+        dstAddress:
+          type: "string"
+          description: "Destination IP or CIDR subnet (e.g. 192.168.10.0/24)"
+        dstPort:
+          type: "number"
+          description: "Destination TCP/UDP port number"
+        comment:
+          type: "string"
+          description: "Audit trail documentation comment"
+        priorityPosition:
+          type: "number"
+          description: "Zero-indexed priority insertion slot (0 = highest priority)"
+      additionalProperties: false
+
+  update_rule_comment:
+    path: "/api/agent/rules/comment"
+    method: "POST"
+    description: "Update documentation comment on an existing firewall rule"
+    headers:
+      Content-Type: "application/json"
+    parameters:
+      type: "object"
+      required:
+        - "comment"
+      properties:
+        ruleId:
+          type: "string"
+          description: "Target rule ID"
+        priorityIndex:
+          type: "number"
+          description: "Target priority index"
+        comment:
+          type: "string"
+          description: "Documentation comment text"
+      additionalProperties: false
+
+  reorder_firewall_rule:
+    path: "/api/agent/rules/reorder"
+    method: "POST"
+    description: "Change the priority order of a firewall filter rule (first matching rule evaluates first)"
+    headers:
+      Content-Type: "application/json"
+    parameters:
+      type: "object"
+      required:
+        - "fromPriority"
+        - "toPriority"
+      properties:
+        fromPriority:
+          type: "number"
+          description: "Source rule priority position"
+        toPriority:
+          type: "number"
+          description: "Target destination priority position"
+      additionalProperties: false
+
+  simulate_packet_trace:
+    path: "/api/agent/simulate"
+    method: "POST"
+    description: "Run packet simulation to test whether firewall rules accept or drop traffic between subnets"
+    headers:
+      Content-Type: "application/json"
+    parameters:
+      type: "object"
+      required:
+        - "srcIp"
+        - "dstIp"
+      properties:
+        srcIp:
+          type: "string"
+          description: "Source IP address to simulate (e.g. 192.168.20.55)"
+        dstIp:
+          type: "string"
+          description: "Destination IP address to simulate (e.g. 192.168.10.15)"
+        protocol:
+          type: "string"
+          enum: ["TCP", "UDP", "ICMP"]
+          description: "Transport protocol"
+        dstPort:
+          type: "number"
+          description: "Destination port"
+      additionalProperties: false
+
+  delete_firewall_rule:
+    path: "/api/agent/rules/delete"
+    method: "POST"
+    description: "Delete a firewall filter rule by ID or priority index"
+    headers:
+      Content-Type: "application/json"
+    parameters:
+      type: "object"
+      properties:
+        ruleId:
+          type: "string"
+          description: "Unique rule identifier"
+        priorityIndex:
+          type: "number"
+          description: "Priority index position"
+      additionalProperties: false
+
+  get_interface_stats:
+    path: "/api/agent/interfaces/stats"
+    method: "GET"
+    description: "Query interface traffic rates, link states, and packet statistics"
+    parameters:
+      type: "object"
+      properties: {}
+      additionalProperties: false
+`;
+    } else {
+      yaml = `# Hermes Agent Tool Manifest: MikroTik RouterOS
+# Destination: ~/.hermes/tools/routeros/tool.yaml
+# Schema Version: 1.0 (Flexible Output Parsing Mode)
+# Target: Hermes Agent v0.1.x - v0.4.x (Tolerant Parser)
+schema_version: "1.0"
+name: mikrotik_routeros
+description: "Direct programmatic management for MikroTik RouterOS: manage firewall filter priority, VLAN isolation, packet simulation, and configuration export."
+version: "1.0.0"
+type: "http"
+base_url: "${baseUrl}"
+
+output_parsing:
+  mode: "flexible"
+  format: "auto"
+  fail_on_unexpected: false
+  allow_text_fallback: true
+  auto_coerce_types: true
 
 endpoints:
   get_router_state:
@@ -633,8 +934,277 @@ endpoints:
     method: "GET"
     description: "Query interface traffic rates, link states, and packet statistics"
 `;
+    }
+
     res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
     res.send(yaml);
+  });
+
+  // Hermes Agent tool.json Manifest (Supports ?mode=strict and ?mode=flexible)
+  app.get('/api/hermes/tool.json', (req: Request, res: Response) => {
+    const host = req.get('host') || 'localhost:3000';
+    const proto = req.protocol || 'http';
+    const baseUrl = `${proto}://${host}`;
+    const mode = (req.query.mode as string)?.toLowerCase() === 'flexible' ? 'flexible' : 'strict';
+
+    if (mode === 'strict') {
+      res.json({
+        schema_version: '2.0',
+        name: 'mikrotik_routeros',
+        description: 'Direct programmatic management for MikroTik RouterOS: manage firewall filter priority, VLAN isolation, packet simulation, and configuration export.',
+        version: '1.0.0',
+        type: 'http',
+        base_url: baseUrl,
+        output_parsing: {
+          mode: 'strict',
+          format: 'json',
+          content_type: 'application/json',
+          validate_schema: true,
+          fail_on_unexpected: true,
+          null_on_error: false,
+          strip_nulls: true
+        },
+        endpoints: {
+          get_router_state: {
+            path: '/api/agent/state',
+            method: 'GET',
+            description: 'Get full router configuration, interfaces, IPs, NAT rules, and priority-ordered firewall filter rules',
+            parameters: {
+              type: 'object',
+              properties: {},
+              additionalProperties: false
+            }
+          },
+          add_firewall_rule: {
+            path: '/api/agent/rules/add',
+            method: 'POST',
+            description: 'Add a firewall filter rule with chain, action, protocol, addresses, ports, priority position, and comment',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            parameters: {
+              type: 'object',
+              required: ['chain', 'action'],
+              properties: {
+                chain: {
+                  type: 'string',
+                  enum: ['forward', 'input', 'output'],
+                  description: 'Packet processing chain in RouterOS filter table'
+                },
+                action: {
+                  type: 'string',
+                  enum: ['accept', 'drop', 'reject', 'log', 'fasttrack-connection'],
+                  description: 'Rule action verdict'
+                },
+                protocol: {
+                  type: 'string',
+                  enum: ['tcp', 'udp', 'icmp', 'any'],
+                  description: 'IP transport protocol'
+                },
+                srcAddress: {
+                  type: 'string',
+                  description: 'Source IP or CIDR subnet (e.g. 192.168.20.0/24)'
+                },
+                dstAddress: {
+                  type: 'string',
+                  description: 'Destination IP or CIDR subnet (e.g. 192.168.10.0/24)'
+                },
+                dstPort: {
+                  type: 'number',
+                  description: 'Destination TCP/UDP port number'
+                },
+                comment: {
+                  type: 'string',
+                  description: 'Audit trail documentation comment'
+                },
+                priorityPosition: {
+                  type: 'number',
+                  description: 'Zero-indexed priority insertion slot (0 = highest priority)'
+                }
+              },
+              additionalProperties: false
+            }
+          },
+          update_rule_comment: {
+            path: '/api/agent/rules/comment',
+            method: 'POST',
+            description: 'Update documentation comment on an existing firewall rule',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            parameters: {
+              type: 'object',
+              required: ['comment'],
+              properties: {
+                ruleId: { type: 'string', description: 'Target rule ID' },
+                priorityIndex: { type: 'number', description: 'Target priority index' },
+                comment: { type: 'string', description: 'Documentation comment text' }
+              },
+              additionalProperties: false
+            }
+          },
+          reorder_firewall_rule: {
+            path: '/api/agent/rules/reorder',
+            method: 'POST',
+            description: 'Change the priority order of a firewall filter rule (first matching rule evaluates first)',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            parameters: {
+              type: 'object',
+              required: ['fromPriority', 'toPriority'],
+              properties: {
+                fromPriority: { type: 'number', description: 'Source rule priority position' },
+                toPriority: { type: 'number', description: 'Target destination priority position' }
+              },
+              additionalProperties: false
+            }
+          },
+          simulate_packet_trace: {
+            path: '/api/agent/simulate',
+            method: 'POST',
+            description: 'Run packet simulation to test whether firewall rules accept or drop traffic between subnets',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            parameters: {
+              type: 'object',
+              required: ['srcIp', 'dstIp'],
+              properties: {
+                srcIp: { type: 'string', description: 'Source IP address to simulate (e.g. 192.168.20.55)' },
+                dstIp: { type: 'string', description: 'Destination IP address to simulate (e.g. 192.168.10.15)' },
+                protocol: { type: 'string', enum: ['TCP', 'UDP', 'ICMP'], description: 'Transport protocol' },
+                dstPort: { type: 'number', description: 'Destination port' }
+              },
+              additionalProperties: false
+            }
+          },
+          delete_firewall_rule: {
+            path: '/api/agent/rules/delete',
+            method: 'POST',
+            description: 'Delete a firewall filter rule by ID or priority index',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            parameters: {
+              type: 'object',
+              properties: {
+                ruleId: { type: 'string', description: 'Unique rule identifier' },
+                priorityIndex: { type: 'number', description: 'Priority index position' }
+              },
+              additionalProperties: false
+            }
+          },
+          get_interface_stats: {
+            path: '/api/agent/interfaces/stats',
+            method: 'GET',
+            description: 'Query interface traffic rates, link states, and packet statistics',
+            parameters: {
+              type: 'object',
+              properties: {},
+              additionalProperties: false
+            }
+          }
+        }
+      });
+    } else {
+      res.json({
+        schema_version: '1.0',
+        name: 'mikrotik_routeros',
+        description: 'Direct programmatic management for MikroTik RouterOS: manage firewall filter priority, VLAN isolation, packet simulation, and configuration export.',
+        version: '1.0.0',
+        type: 'http',
+        base_url: baseUrl,
+        output_parsing: {
+          mode: 'flexible',
+          format: 'auto',
+          fail_on_unexpected: false,
+          allow_text_fallback: true,
+          auto_coerce_types: true
+        },
+        endpoints: {
+          get_router_state: {
+            path: '/api/agent/state',
+            method: 'GET',
+            description: 'Get full router configuration, interfaces, IPs, NAT rules, and priority-ordered firewall rules'
+          },
+          add_firewall_rule: {
+            path: '/api/agent/rules/add',
+            method: 'POST',
+            description: 'Add a firewall filter rule to the router',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body_params: {
+              chain: 'chain',
+              action: 'action',
+              protocol: 'protocol',
+              srcAddress: 'srcAddress',
+              dstAddress: 'dstAddress',
+              dstPort: 'dstPort',
+              comment: 'comment',
+              priorityPosition: 'priorityPosition'
+            }
+          },
+          update_rule_comment: {
+            path: '/api/agent/rules/comment',
+            method: 'POST',
+            description: 'Update documentation comment on an existing firewall rule',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body_params: {
+              ruleId: 'ruleId',
+              priorityIndex: 'priorityIndex',
+              comment: 'comment'
+            }
+          },
+          reorder_firewall_rule: {
+            path: '/api/agent/rules/reorder',
+            method: 'POST',
+            description: 'Change the priority order of a firewall filter rule (first matching rule evaluates first)',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body_params: {
+              fromPriority: 'fromPriority',
+              toPriority: 'toPriority'
+            }
+          },
+          simulate_packet_trace: {
+            path: '/api/agent/simulate',
+            method: 'POST',
+            description: 'Run packet simulation to test whether firewall rules accept or drop traffic between subnets',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body_params: {
+              srcIp: 'srcIp',
+              dstIp: 'dstIp',
+              protocol: 'protocol',
+              dstPort: 'dstPort'
+            }
+          },
+          delete_firewall_rule: {
+            path: '/api/agent/rules/delete',
+            method: 'POST',
+            description: 'Delete a firewall filter rule by ID or priority index',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body_params: {
+              ruleId: 'ruleId',
+              priorityIndex: 'priorityIndex'
+            }
+          },
+          get_interface_stats: {
+            path: '/api/agent/interfaces/stats',
+            method: 'GET',
+            description: 'Query interface traffic rates, link states, and packet statistics'
+          }
+        }
+      });
+    }
   });
 
   // Hermes Agent SKILL.md
@@ -700,6 +1270,51 @@ mcp:
     res.send(config);
   });
 
+  // Pre-configured JSON snippet for registering RouterOS OpenClaw MCP server in config.yaml / openclaw.json
+  app.get('/api/hermes/openclaw.json', (req: Request, res: Response) => {
+    const host = req.get('host') || 'localhost:3000';
+    const proto = req.protocol || 'http';
+    const baseUrl = `${proto}://${host}`;
+
+    const snippet = {
+      mcp: {
+        servers: {
+          openclaw_mikrotik: {
+            command: "node",
+            args: [
+              "~/.hermes/bridges/openclaw-mikrotik.js",
+              "--endpoint",
+              `${baseUrl}/api/mcp`,
+              "--router-ip",
+              "192.168.88.1",
+              "--api-port",
+              "8728",
+              "--user",
+              "admin",
+              "--password-env",
+              "ROUTEROS_PASSWORD",
+              "--strict-priority",
+              "true",
+              "--vlan-aware",
+              "true",
+              "--timeout",
+              "5000"
+            ],
+            env: {
+              MIKROTIK_HOST: "192.168.88.1",
+              MIKROTIK_PORT: "8728",
+              MIKROTIK_USER: "admin",
+              ROUTEROS_PASSWORD: "YOUR_ROUTER_PASSWORD_HERE",
+              OPENCLAW_MCP_ENDPOINT: `${baseUrl}/api/mcp`
+            }
+          }
+        }
+      }
+    };
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.json(snippet);
+  });
+
   // Standalone Stdio-to-HTTP MCP bridge script for Hermes Agent & OpenClaw
   app.get('/api/hermes/bridge.js', (req: Request, res: Response) => {
     const host = req.get('host') || 'localhost:3000';
@@ -757,23 +1372,53 @@ rl.on('line', async (line) => {
 
   // Model Context Protocol (MCP) JSON-RPC 2.0 Endpoint
   app.post('/api/mcp', (req: Request, res: Response) => {
+    const startTime = performance.now();
+    const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
     const body = req.body;
 
     const handleSingleRpc = (rpc: any) => {
-      const { id, method, params } = rpc;
+      const { id, method, params } = rpc || {};
+      const toolName = method === 'tools/call' ? params?.name : undefined;
+
+      // 1. Record Incoming JSON-RPC frame
+      recordJsonRpcTraffic({
+        direction: 'incoming',
+        rpcId: id !== undefined ? id : null,
+        method: method || 'unknown',
+        toolName,
+        status: method ? (method.startsWith('notifications/') ? 'notification' : 'ok') : 'error',
+        sourceIp: clientIp,
+        summary: method
+          ? `--> ${method}${toolName ? ` [${toolName}]` : ''}`
+          : '--> Invalid JSON-RPC frame: missing method',
+        payload: rpc
+      });
 
       if (!method) {
-        return {
+        const errorResponse = {
           jsonrpc: '2.0',
           id: id || null,
           error: { code: -32600, message: 'Invalid Request: missing method' }
         };
+        const durationMs = Number((performance.now() - startTime).toFixed(2));
+        recordJsonRpcTraffic({
+          direction: 'outgoing',
+          rpcId: id || null,
+          method: 'error',
+          status: 'error',
+          errorCode: -32600,
+          errorMessage: 'Invalid Request: missing method',
+          durationMs,
+          summary: `<-- ERROR -32600 (Invalid Request): missing method`,
+          payload: errorResponse
+        });
+        return errorResponse;
       }
 
       // Initialize handshake
       if (method === 'initialize') {
         addAgentLog('MCP', 'Received MCP initialize handshake from AI agent client', 'info');
-        return {
+        const response = {
           jsonrpc: '2.0',
           id,
           result: {
@@ -787,27 +1432,60 @@ rl.on('line', async (line) => {
             }
           }
         };
+        const durationMs = Number((performance.now() - startTime).toFixed(2));
+        recordJsonRpcTraffic({
+          direction: 'outgoing',
+          rpcId: id,
+          method: 'initialize',
+          status: 'ok',
+          durationMs,
+          summary: `<-- 200 OK: Handshake initialized (protocolVersion 2024-11-05)`,
+          payload: response
+        });
+        return response;
       }
 
       // Ping
       if (method === 'ping') {
-        return {
+        const response = {
           jsonrpc: '2.0',
           id,
           result: {}
         };
+        const durationMs = Number((performance.now() - startTime).toFixed(2));
+        recordJsonRpcTraffic({
+          direction: 'outgoing',
+          rpcId: id,
+          method: 'ping',
+          status: 'ok',
+          durationMs,
+          summary: `<-- 200 OK: pong (id: ${id})`,
+          payload: response
+        });
+        return response;
       }
 
       // List available tools
       if (method === 'tools/list') {
         addAgentLog('MCP', `Listed ${MCP_TOOLS.length} RouterOS tools to AI agent`, 'info');
-        return {
+        const response = {
           jsonrpc: '2.0',
           id,
           result: {
             tools: MCP_TOOLS
           }
         };
+        const durationMs = Number((performance.now() - startTime).toFixed(2));
+        recordJsonRpcTraffic({
+          direction: 'outgoing',
+          rpcId: id,
+          method: 'tools/list',
+          status: 'ok',
+          durationMs,
+          summary: `<-- 200 OK: Returned ${MCP_TOOLS.length} tools`,
+          payload: response
+        });
+        return response;
       }
 
       // Call tool
@@ -819,7 +1497,7 @@ rl.on('line', async (line) => {
 
         try {
           const resultData = executeMcpTool(toolName, toolArgs);
-          return {
+          const response = {
             jsonrpc: '2.0',
             id,
             result: {
@@ -831,9 +1509,21 @@ rl.on('line', async (line) => {
               ]
             }
           };
+          const durationMs = Number((performance.now() - startTime).toFixed(2));
+          recordJsonRpcTraffic({
+            direction: 'outgoing',
+            rpcId: id,
+            method: 'tools/call',
+            toolName,
+            status: 'ok',
+            durationMs,
+            summary: `<-- 200 OK: Tool "${toolName}" executed in ${durationMs}ms`,
+            payload: response
+          });
+          return response;
         } catch (err: any) {
           addAgentLog('MCP', `Error executing MCP tool "${toolName}": ${err.message}`, 'error');
-          return {
+          const errorResponse = {
             jsonrpc: '2.0',
             id,
             error: {
@@ -841,6 +1531,20 @@ rl.on('line', async (line) => {
               message: err.message || 'Tool execution error'
             }
           };
+          const durationMs = Number((performance.now() - startTime).toFixed(2));
+          recordJsonRpcTraffic({
+            direction: 'outgoing',
+            rpcId: id,
+            method: 'tools/call',
+            toolName,
+            status: 'error',
+            errorCode: -32000,
+            errorMessage: err.message || 'Tool execution error',
+            durationMs,
+            summary: `<-- ERROR -32000 in "${toolName}": ${err.message}`,
+            payload: errorResponse
+          });
+          return errorResponse;
         }
       }
 
@@ -849,7 +1553,7 @@ rl.on('line', async (line) => {
         return null;
       }
 
-      return {
+      const notFoundResponse = {
         jsonrpc: '2.0',
         id,
         error: {
@@ -857,6 +1561,19 @@ rl.on('line', async (line) => {
           message: `Method not found: ${method}`
         }
       };
+      const durationMs = Number((performance.now() - startTime).toFixed(2));
+      recordJsonRpcTraffic({
+        direction: 'outgoing',
+        rpcId: id,
+        method,
+        status: 'error',
+        errorCode: -32601,
+        errorMessage: `Method not found: ${method}`,
+        durationMs,
+        summary: `<-- ERROR -32601: Method not found: ${method}`,
+        payload: notFoundResponse
+      });
+      return notFoundResponse;
     };
 
     if (Array.isArray(body)) {
@@ -869,6 +1586,107 @@ rl.on('line', async (line) => {
       } else {
         return res.status(204).end();
       }
+    }
+  });
+
+  // Query live JSON-RPC traffic records
+  app.get('/api/mcp/traffic', (req: Request, res: Response) => {
+    const limit = Math.min(parseInt(req.query.limit as string) || 100, 250);
+    const since = req.query.since as string;
+
+    let logs = jsonRpcTrafficLogs;
+    if (since) {
+      logs = logs.filter(l => l.timestamp > since);
+    }
+
+    res.json({
+      status: 'success',
+      totalCaptured: jsonRpcTrafficLogs.length,
+      serverTime: new Date().toISOString(),
+      logs: logs.slice(0, limit)
+    });
+  });
+
+  // Clear live JSON-RPC traffic buffer
+  app.post('/api/mcp/traffic/clear', (req: Request, res: Response) => {
+    jsonRpcTrafficLogs.length = 0;
+    addAgentLog('MCP', 'JSON-RPC wire traffic log buffer cleared by administrator', 'info');
+    res.json({
+      status: 'success',
+      message: 'Traffic log buffer cleared'
+    });
+  });
+
+  // Send a test JSON-RPC packet through the MCP server
+  app.post('/api/mcp/traffic/inject', async (req: Request, res: Response) => {
+    const { action, customPayload } = req.body || {};
+    const testId = `dbg-${Date.now().toString().slice(-4)}`;
+
+    let payload = customPayload;
+    if (!payload) {
+      switch (action) {
+        case 'ping':
+          payload = { jsonrpc: '2.0', id: testId, method: 'ping' };
+          break;
+        case 'initialize':
+          payload = {
+            jsonrpc: '2.0',
+            id: testId,
+            method: 'initialize',
+            params: {
+              protocolVersion: '2024-11-05',
+              clientInfo: { name: 'openclaw-debugger', version: '1.0.0' }
+            }
+          };
+          break;
+        case 'tools_list':
+          payload = { jsonrpc: '2.0', id: testId, method: 'tools/list' };
+          break;
+        case 'simulate_trace':
+          payload = {
+            jsonrpc: '2.0',
+            id: testId,
+            method: 'tools/call',
+            params: {
+              name: 'simulate_packet_trace',
+              arguments: {
+                srcIp: '192.168.20.100',
+                dstIp: '192.168.10.50',
+                protocol: 'TCP',
+                dstPort: 80
+              }
+            }
+          };
+          break;
+        case 'invalid_method':
+          payload = {
+            jsonrpc: '2.0',
+            id: testId,
+            method: 'system/non_existent_method'
+          };
+          break;
+        default:
+          payload = { jsonrpc: '2.0', id: testId, method: 'ping' };
+      }
+    }
+
+    // Call self via fetch
+    try {
+      const host = req.get('host') || 'localhost:3000';
+      const proto = req.protocol || 'http';
+      const fetchRes = await fetch(`${proto}://${host}/api/mcp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await fetchRes.json();
+      res.json({
+        status: 'success',
+        sent: payload,
+        received: data
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 }

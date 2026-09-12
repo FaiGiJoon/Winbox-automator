@@ -135,6 +135,9 @@ export default function App() {
   const [draggedRuleIndex, setDraggedRuleIndex] = useState<number | null>(null);
   const [dragOverRuleIndex, setDragOverRuleIndex] = useState<number | null>(null);
 
+  // Firewall Filter Rules Batch Selection State
+  const [selectedFilterRuleIds, setSelectedFilterRuleIds] = useState<string[]>([]);
+
   // Firewall Filter Rules Inline Comment Editing State
   const [editingRuleCommentId, setEditingRuleCommentId] = useState<string | null>(null);
   const [editingRuleCommentText, setEditingRuleCommentText] = useState<string>('');
@@ -478,7 +481,34 @@ export default function App() {
 
   const deleteFilter = (id: string) => {
     setFilterRules(prev => prev.filter(f => f.id !== id));
+    setSelectedFilterRuleIds(prev => prev.filter(selectedId => selectedId !== id));
     addLog('WinBox', `Deleted Filter Rule ${id}`, 'info');
+  };
+
+  // Toggle selection for a specific firewall filter rule
+  const toggleSelectRule = (ruleId: string) => {
+    setSelectedFilterRuleIds(prev => 
+      prev.includes(ruleId) ? prev.filter(id => id !== ruleId) : [...prev, ruleId]
+    );
+  };
+
+  // Toggle select all firewall filter rules
+  const toggleSelectAllRules = () => {
+    if (filterRules.length === 0) return;
+    if (selectedFilterRuleIds.length === filterRules.length) {
+      setSelectedFilterRuleIds([]);
+    } else {
+      setSelectedFilterRuleIds(filterRules.map(r => r.id));
+    }
+  };
+
+  // Batch delete selected firewall filter rules
+  const deleteSelectedFilterRules = () => {
+    if (selectedFilterRuleIds.length === 0) return;
+    const count = selectedFilterRuleIds.length;
+    setFilterRules(prev => prev.filter(f => !selectedFilterRuleIds.includes(f.id)));
+    setSelectedFilterRuleIds([]);
+    addLog('WinBox', `Batch deleted ${count} Firewall Filter rule${count > 1 ? 's' : ''}.`, 'info');
   };
 
   // Reorder Firewall Filter Rule by moving from one priority position to another
@@ -561,6 +591,7 @@ export default function App() {
       { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports' }
     ];
     setFilterRules(defaults);
+    setSelectedFilterRuleIds([]);
     addLog('WinBox', 'Reset Firewall Filter Rules to factory default priority hierarchy.', 'info');
   };
 
@@ -1477,6 +1508,12 @@ export default function App() {
                             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold">
                               {filterRules.length} rules
                             </span>
+                            {selectedFilterRuleIds.length > 0 && (
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/70 border border-cyan-800/60 text-cyan-300 font-bold flex items-center gap-1 shadow-sm">
+                                <CheckCircle2 size={11} className="text-cyan-400" />
+                                {selectedFilterRuleIds.length} selected
+                              </span>
+                            )}
                           </div>
                           <p className="text-[11px] text-zinc-500 mt-0.5">
                             Rules evaluate top-to-bottom. Drag rows with the grip handle or use the <span className="text-zinc-300 font-mono font-bold">↑</span> / <span className="text-zinc-300 font-mono font-bold">↓</span> buttons to adjust priority.
@@ -1484,16 +1521,41 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        {/* Delete Selected Button */}
+                        <button
+                          type="button"
+                          onClick={deleteSelectedFilterRules}
+                          disabled={selectedFilterRuleIds.length === 0}
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+                            selectedFilterRuleIds.length > 0
+                              ? 'bg-red-950/80 hover:bg-red-900 border border-red-700/80 text-red-200 shadow-[0_0_12px_rgba(239,68,68,0.2)] active:scale-95'
+                              : 'bg-zinc-900/60 border border-zinc-800/60 text-zinc-600 cursor-not-allowed opacity-50'
+                          }`}
+                          title={
+                            selectedFilterRuleIds.length > 0
+                              ? `Delete ${selectedFilterRuleIds.length} selected rule${selectedFilterRuleIds.length > 1 ? 's' : ''}`
+                              : 'Select rules using checkboxes to delete'
+                          }
+                        >
+                          <Trash2 size={13} className={selectedFilterRuleIds.length > 0 ? 'text-red-400' : 'text-zinc-600'} />
+                          <span>Delete Selected</span>
+                          {selectedFilterRuleIds.length > 0 && (
+                            <span className="px-1.5 py-0.5 bg-red-500/20 text-red-300 text-[10px] font-mono rounded font-bold border border-red-500/30">
+                              {selectedFilterRuleIds.length}
+                            </span>
+                          )}
+                        </button>
+
                         <button
                           type="button"
                           onClick={resetDefaultFilterRules}
-                          className="px-2.5 py-1 text-[10px] font-mono rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+                          className="px-2.5 py-1.5 text-[10px] font-mono rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
                           title="Reset rule list to standard default configuration"
                         >
                           Reset Defaults
                         </button>
-                        <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-800/50 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-[0_0_10px_rgba(6,182,212,0.1)]">
+                        <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-800/50 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-[0_0_10px_rgba(6,182,212,0.1)]">
                           <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                           Top First-Match
                         </span>
@@ -1504,6 +1566,28 @@ export default function App() {
                       <table className="w-full text-left text-xs border-collapse">
                         <thead>
                           <tr className="border-b border-zinc-900 text-zinc-500 uppercase tracking-widest text-[9px] font-bold">
+                            <th className="pb-3 pl-3 pr-2 w-10 text-center">
+                              <input
+                                type="checkbox"
+                                checked={filterRules.length > 0 && selectedFilterRuleIds.length === filterRules.length}
+                                ref={(el) => {
+                                  if (el) {
+                                    el.indeterminate = selectedFilterRuleIds.length > 0 && selectedFilterRuleIds.length < filterRules.length;
+                                  }
+                                }}
+                                onChange={toggleSelectAllRules}
+                                disabled={filterRules.length === 0}
+                                aria-label="Select all firewall filter rules"
+                                className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 text-cyan-500 focus:ring-cyan-500/20 focus:ring-offset-0 focus:outline-none cursor-pointer accent-cyan-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title={
+                                  filterRules.length === 0
+                                    ? "No rules to select"
+                                    : selectedFilterRuleIds.length === filterRules.length
+                                    ? "Deselect all rules"
+                                    : "Select all rules"
+                                }
+                              />
+                            </th>
                             <th className="pb-3 pl-2 w-8 text-center" title="Drag to reorder">Grip</th>
                             <th className="pb-3 px-2">Priority & Move</th>
                             <th className="pb-3">Chain</th>
@@ -1519,6 +1603,7 @@ export default function App() {
                           {filterRules.map((rule, index) => {
                             const isBeingDragged = draggedRuleIndex === index;
                             const isDragTarget = dragOverRuleIndex === index && draggedRuleIndex !== index;
+                            const isSelected = selectedFilterRuleIds.includes(rule.id);
 
                             return (
                               <tr 
@@ -1536,9 +1621,22 @@ export default function App() {
                                     ? 'opacity-30 bg-cyan-950/20 border-dashed border-cyan-500/80 scale-[0.99]' 
                                     : isDragTarget
                                     ? 'bg-cyan-950/40 border-t-2 border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.2)]'
+                                    : isSelected
+                                    ? 'bg-cyan-950/25 border-l-2 border-l-cyan-500 hover:bg-cyan-950/35'
                                     : 'hover:bg-zinc-950/60'
                                 }`}
                               >
+                                {/* Checkbox Column */}
+                                <td className="py-3 pl-3 pr-2 text-center w-10" onClick={(e) => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectRule(rule.id)}
+                                    aria-label={`Select rule ${rule.id}`}
+                                    className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 text-cyan-500 focus:ring-cyan-500/20 focus:ring-offset-0 focus:outline-none cursor-pointer accent-cyan-500"
+                                  />
+                                </td>
+
                                 {/* Drag Handle */}
                                 <td className="py-3 pl-2 pr-1 text-center w-8">
                                   <div 
@@ -1713,6 +1811,23 @@ export default function App() {
                               </tr>
                             );
                           })}
+                          {filterRules.length === 0 && (
+                            <tr>
+                              <td colSpan={10} className="py-12 text-center text-zinc-500 text-xs">
+                                <div className="flex flex-col items-center justify-center gap-2">
+                                  <Shield size={20} className="text-zinc-600" />
+                                  <span>No firewall filter rules configured.</span>
+                                  <button
+                                    type="button"
+                                    onClick={resetDefaultFilterRules}
+                                    className="mt-1 px-3 py-1 text-xs font-medium rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                                  >
+                                    Load Default Rules
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>

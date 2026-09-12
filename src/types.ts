@@ -151,3 +151,24 @@ export interface RoMONConfig {
   id?: string;
 }
 
+// Model Context Protocol JSON-RPC traffic monitor entry
+export interface JsonRpcTrafficLog {
+  id: string;
+  timestamp: string;
+  timeFormatted: string;
+  direction: 'incoming' | 'outgoing';
+  rpcId?: string | number | null;
+  method?: string;
+  toolName?: string;
+  durationMs?: number;
+  status: 'ok' | 'error' | 'notification' | 'pending';
+  errorCode?: number;
+  errorMessage?: string;
+  sourceIp?: string;
+  payload: any;
+  rawSize?: number;
+  summary: string;
+}
+
+export type ToolValidationMode = 'strict' | 'flexible';
+

@@ -21,8 +21,10 @@ import {
   Server,
   Network
 } from 'lucide-react';
-import { FirewallFilterRule, IPAddressConfig, InterfaceState, FirewallNATRule } from '../types';
+import { FirewallFilterRule, IPAddressConfig, InterfaceState, FirewallNATRule, ToolValidationMode } from '../types';
 import HermesToolYamlGenerator from './HermesToolYamlGenerator';
+import OpenClawMcpJsonUtility from './OpenClawMcpJsonUtility';
+import JsonRpcTrafficTerminal from './JsonRpcTrafficTerminal';
 
 interface HermesAgentConnectorProps {
   filterRules: FirewallFilterRule[];
@@ -41,7 +43,8 @@ export default function HermesAgentConnector({
   natRules,
   addLog
 }: HermesAgentConnectorProps) {
-  const [activeSetupTab, setActiveSetupTab] = useState<'mcp' | 'tool-yaml' | 'skill' | 'bridge'>('mcp');
+  const [activeSetupTab, setActiveSetupTab] = useState<'mcp' | 'openclaw-mcp' | 'tool-yaml' | 'skill' | 'bridge' | 'traffic-terminal'>('mcp');
+  const [toolValidationMode, setToolValidationMode] = useState<ToolValidationMode>('strict');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
@@ -411,8 +414,61 @@ rl.on('line', async (line) => {
           </div>
         </div>
 
+        {/* tool.yaml Validation & Output Parsing Mode Switcher */}
+        <div className="mt-5 p-3.5 rounded-xl bg-[#050508] border border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-lg border ${toolValidationMode === 'strict' ? 'bg-emerald-950/60 border-emerald-700/50 text-emerald-400' : 'bg-amber-950/60 border-amber-700/50 text-amber-400'}`}>
+              <Shield size={16} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-zinc-200">
+                  tool.yaml Output Parsing Mode:
+                </span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                  toolValidationMode === 'strict'
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                }`}>
+                  {toolValidationMode === 'strict' ? 'Schema v2.0 (Strict RFC)' : 'Schema v1.0 (Flexible Tolerant)'}
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                {toolValidationMode === 'strict'
+                  ? 'Strict JSON Schema: Typed parameters, required arrays, and fail_on_unexpected: true (Hermes Agent v0.5.0+)'
+                  : 'Flexible Parser: Tolerant auto-type coercion and lenient dictionary mappings (Hermes Agent v0.1 - v0.4)'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center p-1 bg-zinc-950 border border-zinc-800 rounded-lg shrink-0 self-start sm:self-auto">
+            <button
+              onClick={() => setToolValidationMode('strict')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                toolValidationMode === 'strict'
+                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-bold shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              Strict
+            </button>
+            <button
+              onClick={() => setToolValidationMode('flexible')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                toolValidationMode === 'flexible'
+                  ? 'bg-amber-950 text-amber-300 border border-amber-700/60 font-bold shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              Flexible
+            </button>
+          </div>
+        </div>
+
         {/* Quick URL Endpoints Strip */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-6 pt-5 border-t border-zinc-900/80">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mt-6 pt-5 border-t border-zinc-900/80">
           <div className="bg-[#050508] border border-zinc-900 rounded-xl p-3 flex items-center justify-between">
             <div>
               <span className="text-[10px] uppercase font-bold text-zinc-500 block">MCP Server Endpoint</span>
@@ -430,14 +486,52 @@ rl.on('line', async (line) => {
           <div className="bg-[#050508] border border-zinc-900 rounded-xl p-3 flex items-center justify-between">
             <div
               className="cursor-pointer group"
+              onClick={() => setActiveSetupTab('openclaw-mcp')}
+              title="Click to open OpenClaw MCP JSON Registration Utility"
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] uppercase font-bold text-zinc-500 block">OpenClaw MCP JSON</span>
+                <span className="text-[9px] font-mono font-bold text-cyan-400 bg-cyan-950/60 px-1 rounded">Utility</span>
+              </div>
+              <code className="text-xs text-zinc-300 group-hover:text-cyan-300 font-mono transition-colors">/api/hermes/openclaw.json</code>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setActiveSetupTab('openclaw-mcp')}
+                className="p-1.5 text-zinc-500 hover:text-cyan-300 rounded hover:bg-zinc-900 transition-colors cursor-pointer"
+                title="Configure OpenClaw JSON Snippet"
+              >
+                <Code2 size={14} />
+              </button>
+              <a
+                href="/api/hermes/openclaw.json"
+                target="_blank"
+                rel="noreferrer"
+                className="p-1.5 text-zinc-500 hover:text-cyan-300 rounded hover:bg-zinc-900 transition-colors"
+                title="Open Raw JSON Snippet"
+              >
+                <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+
+          <div className="bg-[#050508] border border-zinc-900 rounded-xl p-3 flex items-center justify-between">
+            <div
+              className="cursor-pointer group"
               onClick={() => setActiveSetupTab('tool-yaml')}
-              title="Click to open JSON & tool.yaml Generator"
+              title={`Click to open JSON & tool.yaml Generator (${toolValidationMode} mode)`}
             >
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] uppercase font-bold text-zinc-500 block">Hermes Tool Manifest</span>
-                <span className="text-[9px] font-mono font-bold text-cyan-400 bg-cyan-950/60 px-1 rounded">Generator</span>
+                <span className={`text-[9px] font-mono font-bold px-1 rounded ${
+                  toolValidationMode === 'strict' ? 'text-emerald-400 bg-emerald-950/60' : 'text-amber-400 bg-amber-950/60'
+                }`}>
+                  {toolValidationMode}
+                </span>
               </div>
-              <code className="text-xs text-zinc-300 group-hover:text-cyan-300 font-mono transition-colors">/api/hermes/tool.yaml</code>
+              <code className="text-xs text-zinc-300 group-hover:text-cyan-300 font-mono transition-colors">
+                /api/hermes/tool.yaml?mode={toolValidationMode}
+              </code>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -448,11 +542,43 @@ rl.on('line', async (line) => {
                 <Code2 size={14} />
               </button>
               <a
-                href="/api/hermes/tool.yaml"
+                href={`/api/hermes/tool.yaml?mode=${toolValidationMode}`}
                 target="_blank"
                 rel="noreferrer"
                 className="p-1.5 text-zinc-500 hover:text-cyan-300 rounded hover:bg-zinc-900 transition-colors"
-                title="Open Raw Manifest"
+                title={`Open Raw ${toolValidationMode} YAML Manifest`}
+              >
+                <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+
+          <div className="bg-[#050508] border border-zinc-900 rounded-xl p-3 flex items-center justify-between">
+            <div
+              className="cursor-pointer group"
+              onClick={() => setActiveSetupTab('traffic-terminal')}
+              title="Click to inspect Read-Only JSON-RPC Wire Traffic Terminal"
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] uppercase font-bold text-zinc-500 block">Wire Traffic Sniffer</span>
+                <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-950/60 px-1 rounded">Terminal</span>
+              </div>
+              <code className="text-xs text-zinc-300 group-hover:text-cyan-300 font-mono transition-colors">/api/mcp/traffic</code>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setActiveSetupTab('traffic-terminal')}
+                className="p-1.5 text-zinc-500 hover:text-cyan-300 rounded hover:bg-zinc-900 transition-colors cursor-pointer"
+                title="Open Wire Terminal Tab"
+              >
+                <Terminal size={14} />
+              </button>
+              <a
+                href="/api/mcp/traffic"
+                target="_blank"
+                rel="noreferrer"
+                className="p-1.5 text-zinc-500 hover:text-cyan-300 rounded hover:bg-zinc-900 transition-colors"
+                title="Open Raw Traffic JSON API"
               >
                 <ExternalLink size={14} />
               </a>
@@ -627,10 +753,12 @@ rl.on('line', async (line) => {
             {/* Setup Navigation Tabs */}
             <div className="flex flex-wrap gap-1.5 p-1 bg-[#050508] border border-zinc-900 rounded-xl">
               {[
-                { id: 'mcp', label: '1. MCP Server', subtitle: 'config.yaml' },
-                { id: 'tool-yaml', label: '2. tool.yaml Generator', subtitle: 'JSON Utility & YAML' },
-                { id: 'skill', label: '3. Skill Package', subtitle: 'SKILL.md' },
-                { id: 'bridge', label: '4. CLI Bridge', subtitle: 'Stdio bridge' }
+                { id: 'mcp', label: '1. Quick MCP', subtitle: 'config.yaml' },
+                { id: 'openclaw-mcp', label: '2. OpenClaw MCP JSON', subtitle: 'Command & Args Utility' },
+                { id: 'tool-yaml', label: '3. tool.yaml Generator', subtitle: toolValidationMode === 'strict' ? 'v2.0 Strict Mode' : 'v1.0 Flexible Mode' },
+                { id: 'skill', label: '4. Skill Package', subtitle: 'SKILL.md' },
+                { id: 'bridge', label: '5. CLI Bridge', subtitle: 'Stdio bridge' },
+                { id: 'traffic-terminal', label: '6. Wire Log Terminal', subtitle: 'JSON-RPC Wire Sniffer' }
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -675,6 +803,24 @@ rl.on('line', async (line) => {
                   </pre>
                 </div>
 
+                {/* Switch to OpenClaw MCP JSON Snippet Callout */}
+                <div className="p-3 bg-[#050508] border border-cyan-900/40 rounded-xl flex items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <span className="text-[11px] font-bold text-zinc-200 block">
+                      Registering via Stdio Bridge with Command Path & Args?
+                    </span>
+                    <p className="text-[10px] text-zinc-400">
+                      Open the OpenClaw MCP JSON Utility to generate pre-configured JSON with custom command paths, RouterOS host, and connectivity args.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveSetupTab('openclaw-mcp')}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white shrink-0 cursor-pointer"
+                  >
+                    Open Utility <ArrowRight size={12} />
+                  </button>
+                </div>
+
                 <div className="space-y-2">
                   <h4 className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
                     How to Test in Hermes Agent:
@@ -691,9 +837,21 @@ rl.on('line', async (line) => {
               </div>
             )}
 
-            {/* Tab 2: tool.yaml HTTP Manifest & JSON Generator Utility */}
+            {/* Tab 2: OpenClaw MCP Server JSON Registration Utility */}
+            {activeSetupTab === 'openclaw-mcp' && (
+              <OpenClawMcpJsonUtility
+                baseUrl={baseUrl}
+                defaultRouterIp={ips[0]?.address?.split('/')[0] || '192.168.88.1'}
+              />
+            )}
+
+            {/* Tab 3: tool.yaml HTTP Manifest & JSON Generator Utility */}
             {activeSetupTab === 'tool-yaml' && (
-              <HermesToolYamlGenerator baseUrl={baseUrl} />
+              <HermesToolYamlGenerator
+                baseUrl={baseUrl}
+                validationMode={toolValidationMode}
+                onValidationModeChange={setToolValidationMode}
+              />
             )}
 
             {/* Tab 3: SKILL.md Package */}
@@ -754,8 +912,52 @@ rl.on('line', async (line) => {
                 </div>
               </div>
             )}
+
+            {/* Tab 6: Wire Traffic Terminal Log View */}
+            {activeSetupTab === 'traffic-terminal' && (
+              <div className="space-y-3">
+                <div className="p-3 rounded-xl bg-cyan-950/20 border border-cyan-800/30 text-zinc-300 space-y-1">
+                  <div className="font-bold text-cyan-300 flex items-center gap-1.5 text-xs">
+                    <Terminal size={14} /> Live OpenClaw MCP JSON-RPC Wire Monitor
+                  </div>
+                  <p className="text-[11px] text-zinc-400">
+                    Read-only capture of real-time JSON-RPC 2.0 packets exchanged with OpenClaw CLI, Hermes Agent, and MCP client bridges.
+                  </p>
+                </div>
+
+                <JsonRpcTrafficTerminal
+                  baseUrl={baseUrl}
+                  onRefreshState={fetchAgentLogs}
+                  compact={true}
+                />
+              </div>
+            )}
           </div>
         </div>
+      </div>
+
+      {/* Dedicated Read-Only JSON-RPC 2.0 Wire Monitor & Terminal Section */}
+      <div className="space-y-3 pt-6 border-t border-zinc-900/80">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-cyan-950/50 border border-cyan-800/60 text-cyan-400">
+              <Terminal size={16} />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                OpenClaw & Hermes MCP JSON-RPC Wire Traffic Monitor
+                <span className="text-[9px] font-mono font-bold bg-cyan-950 text-cyan-400 border border-cyan-800/60 px-1.5 py-0.2 rounded">
+                  READ-ONLY TERMINAL
+                </span>
+              </h3>
+              <p className="text-[11px] text-zinc-400">
+                Live stream capturing JSON-RPC 2.0 requests, responses, tool calls, and execution latencies between your agents and the RouterOS MCP server.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <JsonRpcTrafficTerminal baseUrl={baseUrl} onRefreshState={fetchAgentLogs} compact={false} />
       </div>
     </div>
   );
