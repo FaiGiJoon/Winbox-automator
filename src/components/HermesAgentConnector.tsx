@@ -110,7 +110,8 @@ export default function HermesAgentConnector({
             srcAddress: r.srcAddress,
             dstAddress: r.dstAddress,
             dstPort: r.dstPort,
-            comment: r.comment
+            comment: r.comment,
+            disabled: Boolean(r.disabled)
           })));
         }
       }

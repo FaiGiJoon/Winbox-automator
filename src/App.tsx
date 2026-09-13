@@ -37,7 +37,8 @@ import {
   Edit2,
   Check,
   X,
-  Bot
+  Bot,
+  Power
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -93,10 +94,10 @@ export default function App() {
   ]);
 
   const [filterRules, setFilterRules] = useState<FirewallFilterRule[]>([
-    { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway' },
-    { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward' },
-    { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)' },
-    { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports' }
+    { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway', disabled: false },
+    { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward', disabled: false },
+    { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)', disabled: false },
+    { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports', disabled: false }
   ]);
 
   const [logs, setLogs] = useState<LogEntry[]>([
@@ -345,6 +346,7 @@ export default function App() {
         const actionMatch = rawText.match(/action=([^\s]+)/);
         const protocolMatch = rawText.match(/protocol=([^\s]+)/);
         const portMatch = rawText.match(/dst-port=([^\s]+)/);
+        const disabledMatch = rawText.match(/disabled=(yes|true)/i);
 
         if (chainMatch && actionMatch) {
           const newRule: FirewallFilterRule = {
@@ -353,10 +355,11 @@ export default function App() {
             action: actionMatch[1] as any,
             protocol: protocolMatch ? protocolMatch[1] : undefined,
             dstPort: portMatch ? parseInt(portMatch[1]) : undefined,
-            comment: 'Added via Secure Direct Assistant'
+            comment: 'Added via Secure Direct Assistant',
+            disabled: Boolean(disabledMatch)
           };
           setFilterRules(prev => [...prev, newRule]);
-          addLog('Router OS', `Applied Filter Rule: chain=${newRule.chain} action=${newRule.action} protocol=${newRule.protocol || 'any'}`, 'command');
+          addLog('Router OS', `Applied Filter Rule: chain=${newRule.chain} action=${newRule.action} protocol=${newRule.protocol || 'any'}${newRule.disabled ? ' [disabled]' : ''}`, 'command');
         }
       } else if (rawText.includes('/ip firewall nat add')) {
         const chainMatch = rawText.match(/chain=([^\s]+)/);
@@ -434,6 +437,7 @@ export default function App() {
     content += `/ip firewall filter\n`;
     filterRules.forEach((filter) => {
       let cmd = `add chain="${filter.chain}" action="${filter.action}"`;
+      if (filter.disabled) cmd += ` disabled=yes`;
       if (filter.protocol && filter.protocol !== 'any') cmd += ` protocol="${filter.protocol.toLowerCase()}"`;
       if (filter.srcAddress) cmd += ` src-address="${filter.srcAddress}"`;
       if (filter.dstAddress) cmd += ` dst-address="${filter.dstAddress}"`;
@@ -511,6 +515,39 @@ export default function App() {
     addLog('WinBox', `Batch deleted ${count} Firewall Filter rule${count > 1 ? 's' : ''}.`, 'info');
   };
 
+  // Toggle enabled/disabled state of a specific firewall filter rule
+  const toggleFilterRuleDisabled = (id: string) => {
+    setFilterRules(prev => prev.map(rule => {
+      if (rule.id === id) {
+        const nextDisabled = !rule.disabled;
+        addLog(
+          'WinBox',
+          `${nextDisabled ? 'Disabled (inactive)' : 'Enabled (active)'} Firewall Filter rule #${rule.id} [${rule.chain} ${rule.action}]`,
+          'info'
+        );
+        return { ...rule, disabled: nextDisabled };
+      }
+      return rule;
+    }));
+  };
+
+  // Batch toggle enabled/disabled state of selected firewall filter rules
+  const setBatchFilterRulesDisabled = (disabled: boolean) => {
+    if (selectedFilterRuleIds.length === 0) return;
+    const count = selectedFilterRuleIds.length;
+    setFilterRules(prev => prev.map(rule => {
+      if (selectedFilterRuleIds.includes(rule.id)) {
+        return { ...rule, disabled };
+      }
+      return rule;
+    }));
+    addLog(
+      'WinBox',
+      `Set ${count} selected Firewall Filter rule${count > 1 ? 's' : ''} to ${disabled ? 'Disabled' : 'Enabled'}.`,
+      'info'
+    );
+  };
+
   // Reorder Firewall Filter Rule by moving from one priority position to another
   const moveFilterRule = (fromIndex: number, toIndex: number) => {
     if (fromIndex === toIndex || toIndex < 0 || toIndex >= filterRules.length) return;
@@ -585,10 +622,10 @@ export default function App() {
 
   const resetDefaultFilterRules = () => {
     const defaults: FirewallFilterRule[] = [
-      { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway' },
-      { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward' },
-      { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)' },
-      { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports' }
+      { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway', disabled: false },
+      { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward', disabled: false },
+      { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)', disabled: false },
+      { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports', disabled: false }
     ];
     setFilterRules(defaults);
     setSelectedFilterRuleIds([]);
@@ -619,11 +656,12 @@ export default function App() {
       protocol: addFilterForm.protocol === 'any' ? undefined : addFilterForm.protocol,
       srcAddress: addFilterForm.srcAddress?.trim() || undefined,
       dstAddress: addFilterForm.dstAddress?.trim() || undefined,
-      comment: addFilterForm.comment || 'Custom user filter'
+      comment: addFilterForm.comment || 'Custom user filter',
+      disabled: Boolean(addFilterForm.disabled)
     };
     setFilterRules(prev => [...prev, newRule]);
-    setAddFilterForm({ chain: 'forward', action: 'drop', protocol: 'any', srcAddress: '', dstAddress: '', comment: '' });
-    addLog('WinBox', `Added Firewall rule at priority #${filterRules.length}: chain=${newRule.chain} action=${newRule.action}`, 'info');
+    setAddFilterForm({ chain: 'forward', action: 'drop', protocol: 'any', srcAddress: '', dstAddress: '', comment: '', disabled: false });
+    addLog('WinBox', `Added Firewall rule at priority #${filterRules.length}: chain=${newRule.chain} action=${newRule.action}${newRule.disabled ? ' [disabled]' : ''}`, 'info');
   };
 
   const triggerPacketSimulation = () => {
@@ -663,6 +701,11 @@ export default function App() {
           // Sequential First-Match Rule Engine
           for (let i = 0; i < filterRules.length; i++) {
             const rule = filterRules[i];
+
+            // Ignore disabled rules in sequential evaluation
+            if (rule.disabled) {
+              continue;
+            }
 
             // Protocol check
             if (rule.protocol && rule.protocol !== 'any') {
@@ -1482,6 +1525,36 @@ export default function App() {
                       />
                     </div>
 
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Initial State</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setAddFilterForm(prev => ({ ...prev, disabled: false }))}
+                          className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                            !addFilterForm.disabled
+                              ? 'bg-emerald-950/80 border-emerald-600 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
+                              : 'bg-[#050508] border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                          }`}
+                        >
+                          <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                          <span>Enabled</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAddFilterForm(prev => ({ ...prev, disabled: true }))}
+                          className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                            addFilterForm.disabled
+                              ? 'bg-zinc-900 border-zinc-600 text-zinc-200'
+                              : 'bg-[#050508] border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                          }`}
+                        >
+                          <span className="w-2 h-2 rounded-full bg-zinc-500" />
+                          <span>Disabled</span>
+                        </button>
+                      </div>
+                    </div>
+
                     <button 
                       type="submit"
                       className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs py-3 rounded-xl transition-colors shadow-lg shadow-cyan-900/10 cursor-pointer"
@@ -1501,13 +1574,23 @@ export default function App() {
                           <ArrowUpDown size={16} />
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h4 className="text-xs font-bold text-white uppercase tracking-wider">
                               Firewall Priority & Order Hierarchy
                             </h4>
                             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold">
                               {filterRules.length} rules
                             </span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-800/50 text-emerald-400 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                              {filterRules.filter(r => !r.disabled).length} active
+                            </span>
+                            {filterRules.some(r => r.disabled) && (
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/60 border border-amber-800/50 text-amber-400 font-bold flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                                {filterRules.filter(r => r.disabled).length} disabled
+                              </span>
+                            )}
                             {selectedFilterRuleIds.length > 0 && (
                               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/70 border border-cyan-800/60 text-cyan-300 font-bold flex items-center gap-1 shadow-sm">
                                 <CheckCircle2 size={11} className="text-cyan-400" />
@@ -1516,12 +1599,36 @@ export default function App() {
                             )}
                           </div>
                           <p className="text-[11px] text-zinc-500 mt-0.5">
-                            Rules evaluate top-to-bottom. Drag rows with the grip handle or use the <span className="text-zinc-300 font-mono font-bold">↑</span> / <span className="text-zinc-300 font-mono font-bold">↓</span> buttons to adjust priority.
+                            Rules evaluate top-to-bottom. Toggle status to enable/disable rules, or drag rows to adjust priority.
                           </p>
                         </div>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        {/* Batch Enable/Disable buttons when items are selected */}
+                        {selectedFilterRuleIds.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setBatchFilterRulesDisabled(false)}
+                              className="px-2.5 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 transition-all cursor-pointer active:scale-95 shadow-[0_0_10px_rgba(16,185,129,0.15)]"
+                              title={`Enable ${selectedFilterRuleIds.length} selected rule${selectedFilterRuleIds.length > 1 ? 's' : ''}`}
+                            >
+                              <CheckCircle2 size={13} className="text-emerald-400" />
+                              <span>Enable ({selectedFilterRuleIds.length})</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBatchFilterRulesDisabled(true)}
+                              className="px-2.5 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 transition-all cursor-pointer active:scale-95"
+                              title={`Disable ${selectedFilterRuleIds.length} selected rule${selectedFilterRuleIds.length > 1 ? 's' : ''}`}
+                            >
+                              <AlertCircle size={13} className="text-amber-400" />
+                              <span>Disable ({selectedFilterRuleIds.length})</span>
+                            </button>
+                          </>
+                        )}
+
                         {/* Delete Selected Button */}
                         <button
                           type="button"
@@ -1590,6 +1697,7 @@ export default function App() {
                             </th>
                             <th className="pb-3 pl-2 w-8 text-center" title="Drag to reorder">Grip</th>
                             <th className="pb-3 px-2">Priority & Move</th>
+                            <th className="pb-3 px-2 text-center">Status</th>
                             <th className="pb-3">Chain</th>
                             <th className="pb-3">Action</th>
                             <th className="pb-3">Source IP</th>
@@ -1623,6 +1731,8 @@ export default function App() {
                                     ? 'bg-cyan-950/40 border-t-2 border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.2)]'
                                     : isSelected
                                     ? 'bg-cyan-950/25 border-l-2 border-l-cyan-500 hover:bg-cyan-950/35'
+                                    : rule.disabled
+                                    ? 'opacity-65 bg-zinc-950/50 hover:bg-zinc-900/40 text-zinc-400'
                                     : 'hover:bg-zinc-950/60'
                                 }`}
                               >
@@ -1664,6 +1774,14 @@ export default function App() {
                                           TOP
                                         </span>
                                       )}
+                                      {rule.disabled && (
+                                        <span 
+                                          className="ml-1.5 text-[8px] font-mono px-1 py-0.5 rounded bg-amber-950/80 border border-amber-700/60 text-amber-300 font-bold uppercase tracking-wider"
+                                          title="RouterOS Flag [X] (Disabled): Rule is inactive and skipped by packet inspection"
+                                        >
+                                          X
+                                        </span>
+                                      )}
                                     </span>
 
                                     {/* Move Buttons */}
@@ -1696,6 +1814,29 @@ export default function App() {
                                       </button>
                                     </div>
                                   </div>
+                                </td>
+
+                                {/* Status Toggle Column */}
+                                <td className="py-3 px-2 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={!rule.disabled}
+                                    onClick={() => toggleFilterRuleDisabled(rule.id)}
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold transition-all cursor-pointer border select-none ${
+                                      !rule.disabled
+                                        ? 'bg-emerald-950/70 hover:bg-emerald-900/90 text-emerald-300 border-emerald-700/60 shadow-[0_0_10px_rgba(16,185,129,0.15)] active:scale-95'
+                                        : 'bg-zinc-900/90 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-700/80 active:scale-95'
+                                    }`}
+                                    title={rule.disabled ? "Rule is currently Disabled / Inactive (Click to Enable)" : "Rule is currently Enabled / Active (Click to Disable)"}
+                                  >
+                                    <span className={`w-4 h-2.5 flex items-center rounded-full p-0.5 transition-colors ${
+                                      !rule.disabled ? 'bg-emerald-500 justify-end' : 'bg-zinc-700 justify-start'
+                                    }`}>
+                                      <span className="w-1.5 h-1.5 rounded-full bg-white shadow-xs" />
+                                    </span>
+                                    <span>{!rule.disabled ? 'Enabled' : 'Disabled'}</span>
+                                  </button>
                                 </td>
 
                                 {/* Chain */}
@@ -1813,7 +1954,7 @@ export default function App() {
                           })}
                           {filterRules.length === 0 && (
                             <tr>
-                              <td colSpan={10} className="py-12 text-center text-zinc-500 text-xs">
+                              <td colSpan={11} className="py-12 text-center text-zinc-500 text-xs">
                                 <div className="flex flex-col items-center justify-center gap-2">
                                   <Shield size={20} className="text-zinc-600" />
                                   <span>No firewall filter rules configured.</span>

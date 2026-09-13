@@ -9,6 +9,7 @@ export interface AgentFilterRule {
   dstAddress?: string;
   dstPort?: number;
   comment?: string;
+  disabled?: boolean;
 }
 
 export interface RouterAgentState {
@@ -38,10 +39,10 @@ export const routerState: RouterAgentState = {
     { id: 'n1', chain: 'srcnat', outInterface: 'lte1', action: 'masquerade', comment: 'Default masquerade outgoing NAT on LTE uplink' }
   ],
   filterRules: [
-    { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway' },
-    { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward' },
-    { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)' },
-    { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports' }
+    { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway', disabled: false },
+    { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward', disabled: false },
+    { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)', disabled: false },
+    { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports', disabled: false }
   ],
   agentLogs: [
     { 
@@ -208,6 +209,11 @@ export function evaluatePacketTrace(input: {
   for (let i = 0; i < routerState.filterRules.length; i++) {
     const rule = routerState.filterRules[i];
 
+    // Skip disabled rules in sequential evaluation
+    if (rule.disabled) {
+      continue;
+    }
+
     if (rule.protocol && rule.protocol !== 'any') {
       if (rule.protocol.toLowerCase() !== protocol.toLowerCase()) {
         continue;
@@ -289,12 +295,13 @@ export function generateRscScript(): string {
   lines.push('', '/ip firewall filter');
   routerState.filterRules.forEach((rule, idx) => {
     let cmd = `add chain=${rule.chain} action=${rule.action}`;
+    if (rule.disabled) cmd += ` disabled=yes`;
     if (rule.protocol && rule.protocol !== 'any') cmd += ` protocol=${rule.protocol}`;
     if (rule.srcAddress) cmd += ` src-address=${rule.srcAddress}`;
     if (rule.dstAddress) cmd += ` dst-address=${rule.dstAddress}`;
     if (rule.dstPort) cmd += ` dst-port=${rule.dstPort}`;
     if (rule.comment) cmd += ` comment="${rule.comment}"`;
-    lines.push(`${cmd} # Priority #${idx}`);
+    lines.push(`${cmd} # Priority #${idx}${rule.disabled ? ' [DISABLED]' : ''}`);
   });
 
   return lines.join('\n');
@@ -416,7 +423,8 @@ export function executeMcpTool(name: string, args: any) {
         srcAddress: args.srcAddress || undefined,
         dstAddress: args.dstAddress || undefined,
         dstPort: args.dstPort ? Number(args.dstPort) : undefined,
-        comment: args.comment || 'Added via Hermes Agent'
+        comment: args.comment || 'Added via Hermes Agent',
+        disabled: Boolean(args.disabled)
       };
 
       if (typeof args.priorityPosition === 'number' && args.priorityPosition >= 0 && args.priorityPosition <= routerState.filterRules.length) {
@@ -533,6 +541,38 @@ export function executeMcpTool(name: string, args: any) {
       };
     }
 
+    case 'toggle_firewall_rule_status': {
+      let targetIndex = -1;
+      if (args.ruleId) {
+        targetIndex = routerState.filterRules.findIndex(r => r.id === args.ruleId);
+      } else if (typeof args.priorityIndex === 'number') {
+        targetIndex = args.priorityIndex;
+      }
+
+      if (targetIndex < 0 || targetIndex >= routerState.filterRules.length) {
+        throw new Error(`Rule not found for status toggle`);
+      }
+
+      const rule = routerState.filterRules[targetIndex];
+      const newDisabled = typeof args.disabled === 'boolean' ? args.disabled : !rule.disabled;
+      rule.disabled = newDisabled;
+      routerState.lastModified = new Date().toISOString();
+
+      addAgentLog(
+        'HermesAgent',
+        `${newDisabled ? 'Disabled' : 'Enabled'} firewall filter rule #${targetIndex} [${rule.chain} ${rule.action}] (${rule.comment || rule.id})`,
+        'command'
+      );
+
+      return {
+        status: 'success',
+        message: `Rule #${targetIndex} is now ${newDisabled ? 'disabled' : 'enabled'}`,
+        rule,
+        disabled: newDisabled,
+        priorityIndex: targetIndex
+      };
+    }
+
     case 'simulate_packet_trace': {
       const traceResult = evaluatePacketTrace({
         srcIp: args.srcIp,
@@ -627,6 +667,16 @@ export function registerAgentConnector(app: Express) {
   app.post('/api/agent/rules/delete', (req: Request, res: Response) => {
     try {
       const result = executeMcpTool('delete_firewall_rule', req.body);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Toggle rule status (Enabled/Disabled) REST endpoint
+  app.post('/api/agent/rules/toggle', (req: Request, res: Response) => {
+    try {
+      const result = executeMcpTool('toggle_firewall_rule_status', req.body);
       res.json(result);
     } catch (err: any) {
       res.status(400).json({ error: err.message });
