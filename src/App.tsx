@@ -38,7 +38,9 @@ import {
   Check,
   X,
   Bot,
-  Power
+  Power,
+  Search,
+  Filter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -142,6 +144,10 @@ export default function App() {
   // Firewall Filter Rules Inline Comment Editing State
   const [editingRuleCommentId, setEditingRuleCommentId] = useState<string | null>(null);
   const [editingRuleCommentText, setEditingRuleCommentText] = useState<string>('');
+
+  // Firewall Filter Rules Chain Filter & Search State
+  const [filterChainFilter, setFilterChainFilter] = useState<'all' | 'input' | 'forward' | 'output'>('all');
+  const [filterSearchQuery, setFilterSearchQuery] = useState<string>('');
 
   // Packet Simulator State - Expanded for sophisticated VLAN isolation checking
   const [simulatorInput, setSimulatorInput] = useState({
@@ -496,13 +502,56 @@ export default function App() {
     );
   };
 
-  // Toggle select all firewall filter rules
+  // Chain counts for filter selector badge counts
+  const filterChainCounts = {
+    all: filterRules.length,
+    input: filterRules.filter(r => r.chain.toLowerCase() === 'input').length,
+    forward: filterRules.filter(r => r.chain.toLowerCase() === 'forward').length,
+    output: filterRules.filter(r => r.chain.toLowerCase() === 'output').length,
+  };
+
+  // Filtered Firewall Rules based on selected Chain and Search Query
+  const visibleFilterRules = filterRules.filter(rule => {
+    if (filterChainFilter !== 'all' && rule.chain.toLowerCase() !== filterChainFilter.toLowerCase()) {
+      return false;
+    }
+    if (filterSearchQuery.trim() !== '') {
+      const q = filterSearchQuery.toLowerCase().trim();
+      const matchesChain = rule.chain?.toLowerCase().includes(q);
+      const matchesAction = rule.action?.toLowerCase().includes(q);
+      const matchesProtocol = rule.protocol?.toLowerCase().includes(q);
+      const matchesSrc = rule.srcAddress?.toLowerCase().includes(q);
+      const matchesDst = rule.dstAddress?.toLowerCase().includes(q);
+      const matchesComment = rule.comment?.toLowerCase().includes(q);
+      const matchesPort = rule.dstPort?.toString().includes(q);
+      const matchesStatus = (rule.disabled ? 'disabled inactive' : 'enabled active').includes(q);
+      return Boolean(
+        matchesChain ||
+        matchesAction ||
+        matchesProtocol ||
+        matchesSrc ||
+        matchesDst ||
+        matchesComment ||
+        matchesPort ||
+        matchesStatus
+      );
+    }
+    return true;
+  });
+
+  // Check if all visible rules are selected
+  const isAllVisibleSelected = visibleFilterRules.length > 0 && visibleFilterRules.every(r => selectedFilterRuleIds.includes(r.id));
+  const isSomeVisibleSelected = visibleFilterRules.some(r => selectedFilterRuleIds.includes(r.id)) && !isAllVisibleSelected;
+
+  // Toggle select all visible firewall filter rules
   const toggleSelectAllRules = () => {
-    if (filterRules.length === 0) return;
-    if (selectedFilterRuleIds.length === filterRules.length) {
-      setSelectedFilterRuleIds([]);
+    if (visibleFilterRules.length === 0) return;
+    if (isAllVisibleSelected) {
+      const visibleIds = new Set(visibleFilterRules.map(r => r.id));
+      setSelectedFilterRuleIds(prev => prev.filter(id => !visibleIds.has(id)));
     } else {
-      setSelectedFilterRuleIds(filterRules.map(r => r.id));
+      const visibleIds = visibleFilterRules.map(r => r.id);
+      setSelectedFilterRuleIds(prev => Array.from(new Set([...prev, ...visibleIds])));
     }
   };
 
@@ -1669,29 +1718,133 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* Filter & Search Toolbar */}
+                    <div id="firewall-filter-toolbar" className="mb-4 p-3 bg-zinc-950/70 border border-zinc-900 rounded-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                      {/* Left: Chain Filter Dropdown & Quick Badges */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-1.5 text-zinc-400 text-xs font-semibold">
+                          <Filter size={14} className="text-cyan-400 shrink-0" />
+                          <span>Chain Filter:</span>
+                        </div>
+
+                        {/* Dropdown Selector */}
+                        <div className="relative">
+                          <select
+                            id="firewall-chain-filter-select"
+                            value={filterChainFilter}
+                            onChange={(e) => setFilterChainFilter(e.target.value as any)}
+                            aria-label="Filter rules by chain"
+                            className="bg-zinc-900 text-zinc-200 text-xs font-medium rounded-lg px-3 py-1.5 pr-8 border border-zinc-800 hover:border-zinc-700 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 cursor-pointer appearance-none transition-colors"
+                          >
+                            <option value="all">All Chains ({filterChainCounts.all})</option>
+                            <option value="input">input ({filterChainCounts.input})</option>
+                            <option value="forward">forward ({filterChainCounts.forward})</option>
+                            <option value="output">output ({filterChainCounts.output})</option>
+                          </select>
+                          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-zinc-400">
+                            <ChevronRight size={12} className="rotate-90" />
+                          </div>
+                        </div>
+
+                        {/* Quick Chain Pill Buttons */}
+                        <div className="flex items-center gap-1">
+                          {(['all', 'input', 'forward', 'output'] as const).map((chain) => {
+                            const count = filterChainCounts[chain];
+                            const isActive = filterChainFilter === chain;
+                            return (
+                              <button
+                                key={chain}
+                                id={`firewall-chain-filter-${chain}-btn`}
+                                type="button"
+                                onClick={() => setFilterChainFilter(chain)}
+                                className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-medium transition-all cursor-pointer select-none ${
+                                  isActive
+                                    ? 'bg-cyan-950/80 border border-cyan-700/80 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.15)] font-bold'
+                                    : 'bg-zinc-900/60 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80'
+                                }`}
+                              >
+                                {chain} <span className="opacity-60 text-[10px]">({count})</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Right: Search Input + Clear Button */}
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1 sm:w-64">
+                          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                          <input
+                            id="firewall-rule-search-input"
+                            type="text"
+                            value={filterSearchQuery}
+                            onChange={(e) => setFilterSearchQuery(e.target.value)}
+                            placeholder="Search chain, IP, comment, port..."
+                            aria-label="Search filter rules"
+                            className="w-full pl-8 pr-8 py-1.5 bg-zinc-900/90 text-zinc-200 text-xs rounded-lg border border-zinc-800 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 placeholder:text-zinc-600 transition-colors"
+                          />
+                          {filterSearchQuery && (
+                            <button
+                              id="firewall-clear-search-btn"
+                              type="button"
+                              onClick={() => setFilterSearchQuery('')}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-zinc-500 hover:text-zinc-300 rounded cursor-pointer"
+                              title="Clear search text"
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Reset Filter Button (visible when any filter/search is active) */}
+                        {(filterChainFilter !== 'all' || filterSearchQuery.trim() !== '') && (
+                          <button
+                            id="firewall-clear-filters-btn"
+                            type="button"
+                            onClick={() => {
+                              setFilterChainFilter('all');
+                              setFilterSearchQuery('');
+                            }}
+                            className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white transition-all flex items-center gap-1 cursor-pointer shrink-0 active:scale-95"
+                            title="Reset chain filter and search"
+                          >
+                            <X size={12} />
+                            <span>Reset</span>
+                          </button>
+                        )}
+
+                        {/* Showing X of Y count badge */}
+                        <div className="text-[11px] font-mono text-zinc-500 shrink-0 whitespace-nowrap pl-1" title={`${visibleFilterRules.length} rules visible out of ${filterRules.length} total`}>
+                          <span className="text-zinc-300 font-bold">{visibleFilterRules.length}</span>
+                          <span className="text-zinc-600">/{filterRules.length}</span>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs border-collapse">
                         <thead>
                           <tr className="border-b border-zinc-900 text-zinc-500 uppercase tracking-widest text-[9px] font-bold">
                             <th className="pb-3 pl-3 pr-2 w-10 text-center">
                               <input
+                                id="firewall-select-all-checkbox"
                                 type="checkbox"
-                                checked={filterRules.length > 0 && selectedFilterRuleIds.length === filterRules.length}
+                                checked={isAllVisibleSelected}
                                 ref={(el) => {
                                   if (el) {
-                                    el.indeterminate = selectedFilterRuleIds.length > 0 && selectedFilterRuleIds.length < filterRules.length;
+                                    el.indeterminate = isSomeVisibleSelected;
                                   }
                                 }}
                                 onChange={toggleSelectAllRules}
-                                disabled={filterRules.length === 0}
-                                aria-label="Select all firewall filter rules"
+                                disabled={visibleFilterRules.length === 0}
+                                aria-label="Select all visible firewall filter rules"
                                 className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 text-cyan-500 focus:ring-cyan-500/20 focus:ring-offset-0 focus:outline-none cursor-pointer accent-cyan-500 disabled:opacity-30 disabled:cursor-not-allowed"
                                 title={
-                                  filterRules.length === 0
-                                    ? "No rules to select"
-                                    : selectedFilterRuleIds.length === filterRules.length
-                                    ? "Deselect all rules"
-                                    : "Select all rules"
+                                  visibleFilterRules.length === 0
+                                    ? "No visible rules to select"
+                                    : isAllVisibleSelected
+                                    ? "Deselect all visible rules"
+                                    : "Select all visible rules"
                                 }
                               />
                             </th>
@@ -1708,7 +1861,8 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-zinc-900/30 font-sans">
-                          {filterRules.map((rule, index) => {
+                          {visibleFilterRules.map((rule) => {
+                            const index = filterRules.findIndex(r => r.id === rule.id);
                             const isBeingDragged = draggedRuleIndex === index;
                             const isDragTarget = dragOverRuleIndex === index && draggedRuleIndex !== index;
                             const isSelected = selectedFilterRuleIds.includes(rule.id);
@@ -1952,6 +2106,32 @@ export default function App() {
                               </tr>
                             );
                           })}
+                          {filterRules.length > 0 && visibleFilterRules.length === 0 && (
+                            <tr>
+                              <td colSpan={11} className="py-12 text-center text-zinc-500 text-xs">
+                                <div className="flex flex-col items-center justify-center gap-2">
+                                  <Filter size={20} className="text-zinc-600" />
+                                  <span className="text-zinc-400 font-medium">No firewall filter rules match your filter criteria.</span>
+                                  <p className="text-[11px] text-zinc-500">
+                                    {filterChainFilter !== 'all' ? `Chain: "${filterChainFilter}"` : ''}
+                                    {filterChainFilter !== 'all' && filterSearchQuery.trim() !== '' ? ' • ' : ''}
+                                    {filterSearchQuery.trim() !== '' ? `Search query: "${filterSearchQuery}"` : ''}
+                                  </p>
+                                  <button
+                                    id="firewall-no-matches-reset-btn"
+                                    type="button"
+                                    onClick={() => {
+                                      setFilterChainFilter('all');
+                                      setFilterSearchQuery('');
+                                    }}
+                                    className="mt-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                                  >
+                                    Reset Chain & Search Filters
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
                           {filterRules.length === 0 && (
                             <tr>
                               <td colSpan={11} className="py-12 text-center text-zinc-500 text-xs">
@@ -1959,6 +2139,7 @@ export default function App() {
                                   <Shield size={20} className="text-zinc-600" />
                                   <span>No firewall filter rules configured.</span>
                                   <button
+                                    id="firewall-load-defaults-btn"
                                     type="button"
                                     onClick={resetDefaultFilterRules}
                                     className="mt-1 px-3 py-1 text-xs font-medium rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer"
