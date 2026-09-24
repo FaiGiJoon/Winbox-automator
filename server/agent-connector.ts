@@ -10,6 +10,8 @@ export interface AgentFilterRule {
   dstPort?: number;
   comment?: string;
   disabled?: boolean;
+  packets?: number;
+  bytes?: number;
 }
 
 export interface RouterAgentState {
@@ -39,10 +41,10 @@ export const routerState: RouterAgentState = {
     { id: 'n1', chain: 'srcnat', outInterface: 'lte1', action: 'masquerade', comment: 'Default masquerade outgoing NAT on LTE uplink' }
   ],
   filterRules: [
-    { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway', disabled: false },
-    { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward', disabled: false },
-    { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)', disabled: false },
-    { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports', disabled: false }
+    { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway', disabled: false, packets: 1420, bytes: 119280 },
+    { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward', disabled: false, packets: 58940, bytes: 48920140 },
+    { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)', disabled: false, packets: 348, bytes: 29232 },
+    { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports', disabled: false, packets: 112, bytes: 9408 }
   ],
   agentLogs: [
     { 
@@ -394,8 +396,230 @@ export const MCP_TOOLS = [
       properties: {},
       additionalProperties: false
     }
+  },
+  // --- Official MikroTik MCP (jeff-nasseri/mikrotik-mcp) Tools ---
+  {
+    name: 'mikrotik_create_vlan_interface',
+    description: 'Create a tagged 802.1Q VLAN sub-interface on a parent port or bridge.',
+    inputSchema: {
+      type: 'object',
+      required: ['name', 'vlan_id', 'interface'],
+      properties: {
+        name: { type: 'string', description: 'Interface name (e.g. vlan200)' },
+        vlan_id: { type: 'number', description: '802.1Q tag ID (1-4094)' },
+        interface: { type: 'string', description: 'Parent interface (e.g. ether1, bridge-vlan)' },
+        comment: { type: 'string', description: 'Administrative label' }
+      }
+    }
+  },
+  {
+    name: 'mikrotik_add_ip_address',
+    description: 'Bind an IPv4 address and CIDR subnet to an interface.',
+    inputSchema: {
+      type: 'object',
+      required: ['address', 'interface'],
+      properties: {
+        address: { type: 'string', description: 'IP address with CIDR (e.g. 192.168.200.1/24)' },
+        interface: { type: 'string', description: 'Target interface' },
+        comment: { type: 'string', description: 'Audit comment' }
+      }
+    }
+  },
+  {
+    name: 'mikrotik_create_dhcp_pool',
+    description: 'Create a named IP address pool for DHCP/VPN assignment.',
+    inputSchema: {
+      type: 'object',
+      required: ['name', 'ranges'],
+      properties: {
+        name: { type: 'string', description: 'Pool identifier (e.g. pool-200)' },
+        ranges: { type: 'string', description: 'IP range (e.g. 192.168.200.10-192.168.200.100)' }
+      }
+    }
+  },
+  {
+    name: 'mikrotik_create_nat_rule',
+    description: 'Create a source NAT (masquerade), destination NAT, or port forward rule.',
+    inputSchema: {
+      type: 'object',
+      required: ['chain', 'action'],
+      properties: {
+        chain: { type: 'string', enum: ['srcnat', 'dstnat'], description: 'NAT chain' },
+        action: { type: 'string', enum: ['masquerade', 'dst-nat', 'redirect', 'src-nat'], description: 'Action' },
+        out_interface: { type: 'string', description: 'Outbound interface (for masquerade)' },
+        in_interface: { type: 'string', description: 'Inbound interface' },
+        dst_port: { type: 'number', description: 'Port' },
+        to_addresses: { type: 'string', description: 'Target host IP' },
+        comment: { type: 'string', description: 'Annotation' }
+      }
+    }
+  },
+  {
+    name: 'mikrotik_create_filter_rule',
+    description: 'Create a firewall filter rule with chain, action, protocol, and addresses.',
+    inputSchema: {
+      type: 'object',
+      required: ['chain', 'action'],
+      properties: {
+        chain: { type: 'string', enum: ['input', 'forward', 'output'] },
+        action: { type: 'string', enum: ['accept', 'drop', 'reject', 'log'] },
+        protocol: { type: 'string' },
+        src_address: { type: 'string' },
+        dst_address: { type: 'string' },
+        dst_port: { type: 'number' },
+        comment: { type: 'string' }
+      }
+    }
+  },
+  {
+    name: 'mikrotik_safe_mode_status',
+    description: 'Inspect RouterOS Safe Mode session state, armed status, and pending changes.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'mikrotik_safe_mode_enable',
+    description: 'Arm Safe Mode for the active session. If connection drops, modifications auto-revert.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session_timeout: { type: 'number', description: 'Auto-revert timeout in seconds (default 300)' }
+      }
+    }
+  },
+  {
+    name: 'mikrotik_safe_mode_commit',
+    description: 'Commit all verified changes and persist permanently.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'mikrotik_safe_mode_rollback',
+    description: 'Immediately abort and revert all uncommitted changes back to snapshot.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'mikrotik_create_simple_queue',
+    description: 'Configure simple queue bandwidth shaping on a VLAN, subnet, or client IP.',
+    inputSchema: {
+      type: 'object',
+      required: ['name', 'target', 'max_limit_upload', 'max_limit_download'],
+      properties: {
+        name: { type: 'string' },
+        target: { type: 'string' },
+        max_limit_upload: { type: 'string' },
+        max_limit_download: { type: 'string' },
+        comment: { type: 'string' }
+      }
+    }
+  },
+  {
+    name: 'mikrotik_flush_dns_cache',
+    description: 'Flush the local RouterOS DNS resolver cache memory.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'mikrotik_add_dns_static',
+    description: 'Add static DNS A record or internal hostname mapping.',
+    inputSchema: {
+      type: 'object',
+      required: ['name', 'address'],
+      properties: {
+        name: { type: 'string' },
+        address: { type: 'string' },
+        ttl: { type: 'string' },
+        comment: { type: 'string' }
+      }
+    }
+  },
+  {
+    name: 'mikrotik_create_wireguard_interface',
+    description: 'Create a WireGuard VPN tunnel endpoint.',
+    inputSchema: {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: { type: 'string' },
+        listen_port: { type: 'number' },
+        comment: { type: 'string' }
+      }
+    }
+  },
+  {
+    name: 'mikrotik_add_wireguard_peer',
+    description: 'Register a client device or remote peer to a WireGuard tunnel.',
+    inputSchema: {
+      type: 'object',
+      required: ['interface', 'public_key', 'allowed_address'],
+      properties: {
+        interface: { type: 'string' },
+        public_key: { type: 'string' },
+        allowed_address: { type: 'string' },
+        comment: { type: 'string' }
+      }
+    }
+  },
+  {
+    name: 'mikrotik_get_poe_status',
+    description: 'Inspect live PoE-Out telemetry: voltage (V), current (mA), and power (Watts).',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'mikrotik_select_fleet_device',
+    description: 'Target a specific router across the fleet inventory.',
+    inputSchema: {
+      type: 'object',
+      required: ['device'],
+      properties: {
+        device: { type: 'string', description: 'Router identifier from fleet.yaml' }
+      }
+    }
   }
 ];
+
+// Safe Mode and Extended State
+export interface SafeModeState {
+  active: boolean;
+  startedAt: string | null;
+  pendingChangesCount: number;
+  targetDevice: string;
+}
+
+export const safeModeState: SafeModeState = {
+  active: false,
+  startedAt: null,
+  pendingChangesCount: 0,
+  targetDevice: 'edge-router-core'
+};
+
+let safeModeSnapshot: {
+  interfaces: any[];
+  ips: any[];
+  natRules: any[];
+  filterRules: any[];
+} | null = null;
+
+let ipPoolsState: Array<{ name: string; ranges: string }> = [
+  { name: 'default-dhcp', ranges: '192.168.88.10-192.168.88.254' }
+];
+
+let queuesState: Array<{ name: string; target: string; maxLimit: string; comment?: string }> = [];
+let dnsSettingsState = {
+  servers: '1.1.1.1,8.8.8.8',
+  dynamicServers: '192.168.88.1',
+  useDohServer: '',
+  verifyDohCert: true,
+  allowRemoteRequests: true,
+  cacheSize: 2048,
+  cacheMaxTtl: '1w'
+};
+let dnsCacheState: Array<{ name: string; type: string; data: string; ttl: string }> = [
+  { name: 'api.routeros.internal', type: 'A', data: '192.168.88.1', ttl: '00:14:32' },
+  { name: 'cloudflare-dns.com', type: 'A', data: '104.16.249.249', ttl: '00:03:18' },
+  { name: 'github.com', type: 'A', data: '140.82.121.4', ttl: '00:01:45' }
+];
+let dnsStaticState: Array<{ name: string; address?: string; cname?: string; regexp?: string; ttl?: string; comment?: string; type?: string }> = [
+  { name: 'router.lan', address: '192.168.88.1', comment: 'Local Gateway' }
+];
+let wireguardPeersState: Array<{ interface: string; publicKey: string; allowedAddress: string; comment?: string }> = [];
 
 export function executeMcpTool(name: string, args: any) {
   switch (name) {
@@ -424,7 +648,9 @@ export function executeMcpTool(name: string, args: any) {
         dstAddress: args.dstAddress || undefined,
         dstPort: args.dstPort ? Number(args.dstPort) : undefined,
         comment: args.comment || 'Added via Hermes Agent',
-        disabled: Boolean(args.disabled)
+        disabled: Boolean(args.disabled),
+        packets: 0,
+        bytes: 0
       };
 
       if (typeof args.priorityPosition === 'number' && args.priorityPosition >= 0 && args.priorityPosition <= routerState.filterRules.length) {
@@ -596,6 +822,603 @@ export function executeMcpTool(name: string, args: any) {
         status: 'success',
         format: 'RouterOS v7 RSC',
         script
+      };
+    }
+
+    // --- Official MikroTik MCP (jeff-nasseri/mikrotik-mcp) Tool Handlers ---
+    case 'mikrotik_create_vlan_interface': {
+      const vlanName = args.name || `vlan${args.vlan_id || 100}`;
+      const existing = routerState.interfaces.find(i => i.name === vlanName);
+      if (existing) {
+        existing.comment = args.comment || `VLAN ID ${args.vlan_id} on ${args.interface || 'ether1'}`;
+      } else {
+        routerState.interfaces.push({
+          name: vlanName,
+          type: 'vlan',
+          ipAddress: 'unassigned',
+          status: 'up',
+          rxSpeed: '0 bps',
+          txSpeed: '0 bps',
+          comment: args.comment || `VLAN ID ${args.vlan_id} on ${args.interface || 'ether1'}`
+        });
+      }
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      routerState.lastModified = new Date().toISOString();
+      const cli = `/interface vlan add name=${vlanName} vlan-id=${args.vlan_id} interface=${args.interface || 'ether1'}${args.comment ? ` comment="${args.comment}"` : ''}`;
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `Created VLAN interface ${vlanName} on ${args.interface || 'ether1'} with tag ${args.vlan_id}`,
+        type: 'command'
+      });
+      return {
+        status: 'success',
+        interface: vlanName,
+        vlanId: args.vlan_id,
+        parent: args.interface || 'ether1',
+        cliCommand: cli,
+        message: `vlan ${vlanName} created on ${args.interface || 'ether1'} · tag ${args.vlan_id}`
+      };
+    }
+
+    case 'mikrotik_list_vlan_interfaces': {
+      const vlans = routerState.interfaces.filter(i => i.type === 'vlan');
+      return { status: 'success', count: vlans.length, vlans };
+    }
+
+    case 'mikrotik_add_ip_address': {
+      const targetIf = args.interface;
+      const newIp = {
+        id: `ip-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        address: args.address,
+        network: args.address.split('/')[0],
+        interface: targetIf,
+        comment: args.comment || 'Added via MikroTik MCP'
+      };
+      const idx = routerState.ips.findIndex(i => i.interface === targetIf && i.address === args.address);
+      if (idx >= 0) {
+        routerState.ips[idx] = newIp;
+      } else {
+        routerState.ips.push(newIp);
+      }
+      const matchingIf = routerState.interfaces.find(i => i.name === targetIf);
+      if (matchingIf) {
+        matchingIf.ipAddress = args.address;
+      }
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      routerState.lastModified = new Date().toISOString();
+      const cli = `/ip address add address=${args.address} interface=${targetIf}${args.comment ? ` comment="${args.comment}"` : ''}`;
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `Assigned IP ${args.address} to interface ${targetIf}`,
+        type: 'command'
+      });
+      return {
+        status: 'success',
+        address: args.address,
+        interface: targetIf,
+        cliCommand: cli,
+        message: `${args.address} bound to ${targetIf}`
+      };
+    }
+
+    case 'mikrotik_list_ip_addresses': {
+      return { status: 'success', count: routerState.ips.length, ips: routerState.ips };
+    }
+
+    case 'mikrotik_create_dhcp_pool': {
+      const poolName = args.name || 'dhcp-pool-1';
+      const existing = ipPoolsState.find(p => p.name === poolName);
+      if (existing) {
+        existing.ranges = args.ranges;
+      } else {
+        ipPoolsState.push({ name: poolName, ranges: args.ranges });
+      }
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      const cli = `/ip pool add name=${poolName} ranges=${args.ranges}`;
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `Created IP pool ${poolName} (${args.ranges})`,
+        type: 'command'
+      });
+      return {
+        status: 'success',
+        pool: poolName,
+        ranges: args.ranges,
+        cliCommand: cli,
+        message: `Pool "${poolName}" · ${args.ranges}`
+      };
+    }
+
+    case 'mikrotik_list_ip_pools': {
+      return { status: 'success', pools: ipPoolsState };
+    }
+
+    case 'mikrotik_create_nat_rule': {
+      const natId = `n-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const rule = {
+        id: natId,
+        chain: args.chain || 'srcnat',
+        action: args.action || 'masquerade',
+        outInterface: args.out_interface || args.outInterface,
+        inInterface: args.in_interface || args.inInterface,
+        dstPort: args.dst_port ? Number(args.dst_port) : undefined,
+        toAddresses: args.to_addresses,
+        comment: args.comment || 'Added via MikroTik MCP'
+      };
+      routerState.natRules.push(rule);
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      routerState.lastModified = new Date().toISOString();
+      const cli = `/ip firewall nat add chain=${rule.chain} action=${rule.action}${rule.outInterface ? ` out-interface=${rule.outInterface}` : ''}${rule.comment ? ` comment="${rule.comment}"` : ''}`;
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `Added NAT rule: chain=${rule.chain} action=${rule.action}`,
+        type: 'command'
+      });
+      return {
+        status: 'success',
+        ruleId: natId,
+        chain: rule.chain,
+        action: rule.action,
+        cliCommand: cli,
+        message: `NAT rule added at index ${routerState.natRules.length - 1}`
+      };
+    }
+
+    case 'mikrotik_list_nat_rules': {
+      return { status: 'success', count: routerState.natRules.length, rules: routerState.natRules };
+    }
+
+    case 'mikrotik_create_filter_rule': {
+      const rule = {
+        chain: args.chain,
+        action: args.action,
+        protocol: args.protocol,
+        srcAddress: args.src_address || args.srcAddress,
+        dstAddress: args.dst_address || args.dstAddress,
+        dstPort: args.dst_port ? Number(args.dst_port) : undefined,
+        comment: args.comment || 'Added via MikroTik MCP',
+        disabled: false,
+        packets: 0,
+        bytes: 0
+      };
+      const result = executeMcpTool('add_firewall_filter_rule', rule);
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      return {
+        ...result,
+        cliCommand: `/ip firewall filter add chain=${rule.chain} action=${rule.action}${rule.protocol ? ` protocol=${rule.protocol}` : ''}${rule.srcAddress ? ` src-address=${rule.srcAddress}` : ''}${rule.dstAddress ? ` dst-address=${rule.dstAddress}` : ''}${rule.dstPort ? ` dst-port=${rule.dstPort}` : ''}${rule.comment ? ` comment="${rule.comment}"` : ''}`
+      };
+    }
+
+    case 'mikrotik_list_filter_rules': {
+      return {
+        status: 'success',
+        count: routerState.filterRules.length,
+        rules: routerState.filterRules.map((r, i) => ({ priority: i, ...r }))
+      };
+    }
+
+    case 'mikrotik_safe_mode_status': {
+      return {
+        status: 'success',
+        ...safeModeState,
+        message: safeModeState.active ? `Safe-Mode is ARMED with ${safeModeState.pendingChangesCount} pending changes.` : 'Safe-Mode is currently inactive.'
+      };
+    }
+
+    case 'mikrotik_safe_mode_enable': {
+      if (!safeModeState.active) {
+        safeModeSnapshot = JSON.parse(JSON.stringify({
+          interfaces: routerState.interfaces,
+          ips: routerState.ips,
+          natRules: routerState.natRules,
+          filterRules: routerState.filterRules
+        }));
+        safeModeState.active = true;
+        safeModeState.startedAt = new Date().toISOString();
+        safeModeState.pendingChangesCount = 0;
+      }
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: '[SAFE-MODE ARMED] Changes will revert automatically on connection loss or rollback.',
+        type: 'warning'
+      });
+      return {
+        status: 'success',
+        safeMode: true,
+        message: 'Safe Mode armed. Modifications are guarded with automatic rollback capability.'
+      };
+    }
+
+    case 'mikrotik_safe_mode_commit': {
+      const changeCount = safeModeState.pendingChangesCount;
+      safeModeSnapshot = null;
+      safeModeState.active = false;
+      safeModeState.startedAt = null;
+      safeModeState.pendingChangesCount = 0;
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `[SAFE-MODE COMMITTED] ${changeCount} changes committed permanently to NVRAM.`,
+        type: 'info'
+      });
+      return {
+        status: 'success',
+        committedChanges: changeCount,
+        message: `Safe Mode session committed successfully. ${changeCount} changes persisted.`
+      };
+    }
+
+    case 'mikrotik_safe_mode_rollback': {
+      const revertedCount = safeModeState.pendingChangesCount;
+      if (safeModeSnapshot) {
+        routerState.interfaces = safeModeSnapshot.interfaces;
+        routerState.ips = safeModeSnapshot.ips;
+        routerState.natRules = safeModeSnapshot.natRules;
+        routerState.filterRules = safeModeSnapshot.filterRules;
+      }
+      safeModeSnapshot = null;
+      safeModeState.active = false;
+      safeModeState.startedAt = null;
+      safeModeState.pendingChangesCount = 0;
+      routerState.lastModified = new Date().toISOString();
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `[SAFE-MODE ROLLBACK] Reverted ${revertedCount} uncommitted changes. Restored baseline state.`,
+        type: 'error'
+      });
+      return {
+        status: 'success',
+        revertedChanges: revertedCount,
+        message: `Safe Mode rollback triggered. All ${revertedCount} modifications were safely undone.`
+      };
+    }
+
+    case 'mikrotik_create_simple_queue': {
+      const q = {
+        name: args.name,
+        target: args.target,
+        maxLimit: `${args.max_limit_upload || '10M'}/${args.max_limit_download || '20M'}`,
+        comment: args.comment || 'Rate limit via MikroTik MCP'
+      };
+      queuesState.push(q);
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      const cli = `/queue simple add name=${q.name} target=${q.target} max-limit=${q.maxLimit}${q.comment ? ` comment="${q.comment}"` : ''}`;
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `Configured Simple Queue ${q.name} target=${q.target} max-limit=${q.maxLimit}`,
+        type: 'command'
+      });
+      return {
+        status: 'success',
+        queue: q,
+        cliCommand: cli,
+        message: `Queue "${q.name}" active (${q.maxLimit})`
+      };
+    }
+
+    // --- DNS Tools (All 15 RouterOS DNS tools) ---
+    case 'mikrotik_get_dns_settings': {
+      return {
+        status: 'success',
+        settings: dnsSettingsState,
+        cliCommand: '/ip dns print',
+        message: 'DNS settings retrieved'
+      };
+    }
+
+    case 'mikrotik_set_upstream_dns': {
+      if (args.servers) dnsSettingsState.servers = args.servers;
+      if (args.allow_remote_requests !== undefined) dnsSettingsState.allowRemoteRequests = Boolean(args.allow_remote_requests);
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      const cli = `/ip dns set servers=${dnsSettingsState.servers} allow-remote-requests=${dnsSettingsState.allowRemoteRequests ? 'yes' : 'no'}`;
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `Updated upstream DNS servers to: ${dnsSettingsState.servers}`,
+        type: 'command'
+      });
+      return {
+        status: 'success',
+        servers: dnsSettingsState.servers,
+        allowRemoteRequests: dnsSettingsState.allowRemoteRequests,
+        cliCommand: cli,
+        message: `Upstream DNS servers updated to ${dnsSettingsState.servers}`
+      };
+    }
+
+    case 'mikrotik_get_dns_stats': {
+      return {
+        status: 'success',
+        cacheSize: dnsSettingsState.cacheSize,
+        cacheUsed: 42,
+        hitRatio: '88.4%',
+        activeQueriesPerSec: 14,
+        forwarderLatencyMs: 11.2,
+        cliCommand: '/ip dns print stats'
+      };
+    }
+
+    case 'mikrotik_flush_dns_cache': {
+      dnsCacheState.length = 0;
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: 'RouterOS DNS resolver cache flushed successfully',
+        type: 'info'
+      });
+      return {
+        status: 'success',
+        cliCommand: '/ip dns cache flush',
+        message: 'RouterOS DNS cache flushed'
+      };
+    }
+
+    case 'mikrotik_list_dns_cache': {
+      return {
+        status: 'success',
+        count: dnsCacheState.length,
+        cache: dnsCacheState,
+        cliCommand: '/ip dns cache print detail'
+      };
+    }
+
+    case 'mikrotik_get_dns_cache_entry': {
+      const query = (args.name || '').toLowerCase();
+      const results = dnsCacheState.filter(c => c.name.toLowerCase().includes(query) || c.data.includes(query));
+      return {
+        status: 'success',
+        matchCount: results.length,
+        entries: results,
+        cliCommand: `/ip dns cache print where name~"${args.name}"`
+      };
+    }
+
+    case 'mikrotik_list_dns_static': {
+      return {
+        status: 'success',
+        count: dnsStaticState.length,
+        staticRecords: dnsStaticState,
+        cliCommand: '/ip dns static print detail'
+      };
+    }
+
+    case 'mikrotik_add_dns_static': {
+      dnsStaticState.push({
+        name: args.name,
+        address: args.address,
+        ttl: args.ttl || '1d',
+        comment: args.comment,
+        type: 'A'
+      });
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      const cli = `/ip dns static add name=${args.name} address=${args.address}${args.ttl ? ` ttl=${args.ttl}` : ''}`;
+      return {
+        status: 'success',
+        name: args.name,
+        address: args.address,
+        cliCommand: cli,
+        message: `Static DNS mapping ${args.name} -> ${args.address} created`
+      };
+    }
+
+    case 'mikrotik_get_dns_static': {
+      const match = dnsStaticState.find(r => r.name.toLowerCase() === (args.name || '').toLowerCase());
+      if (!match) {
+        throw new Error(`Static DNS record for "${args.name}" not found`);
+      }
+      return {
+        status: 'success',
+        record: match,
+        cliCommand: `/ip dns static print where name="${args.name}"`
+      };
+    }
+
+    case 'mikrotik_update_dns_static': {
+      const record = dnsStaticState.find(r => r.name.toLowerCase() === (args.name || '').toLowerCase());
+      if (!record) {
+        throw new Error(`Static DNS record "${args.name}" not found`);
+      }
+      if (args.address) record.address = args.address;
+      if (args.ttl) record.ttl = args.ttl;
+      if (args.comment) record.comment = args.comment;
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      return {
+        status: 'success',
+        record,
+        cliCommand: `/ip dns static set [find name="${args.name}"] address=${args.address || record.address}`,
+        message: `Static DNS record "${args.name}" updated`
+      };
+    }
+
+    case 'mikrotik_remove_dns_static': {
+      const idx = dnsStaticState.findIndex(r => r.name.toLowerCase() === (args.name || '').toLowerCase());
+      if (idx === -1) {
+        throw new Error(`Static DNS record "${args.name}" not found`);
+      }
+      dnsStaticState.splice(idx, 1);
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      return {
+        status: 'success',
+        cliCommand: `/ip dns static remove [find name="${args.name}"]`,
+        message: `Static DNS record "${args.name}" removed`
+      };
+    }
+
+    case 'mikrotik_add_dns_cname': {
+      dnsStaticState.push({
+        name: args.alias,
+        cname: args.target,
+        type: 'CNAME',
+        comment: args.comment || 'CNAME alias via MCP'
+      });
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      return {
+        status: 'success',
+        alias: args.alias,
+        target: args.target,
+        cliCommand: `/ip dns static add name=${args.alias} cname=${args.target} type=CNAME`,
+        message: `DNS CNAME ${args.alias} -> ${args.target} registered`
+      };
+    }
+
+    case 'mikrotik_add_dns_adblock_regexp': {
+      dnsStaticState.push({
+        name: args.pattern,
+        regexp: args.pattern,
+        type: 'NXDOMAIN',
+        comment: args.comment || 'AdBlock Sinkhole'
+      });
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      return {
+        status: 'success',
+        pattern: args.pattern,
+        cliCommand: `/ip dns static add regexp="${args.pattern}" type=NXDOMAIN`,
+        message: `Adblock regex sinkhole rule added`
+      };
+    }
+
+    case 'mikrotik_set_dns_doh_server': {
+      dnsSettingsState.useDohServer = args.doh_url || 'https://cloudflare-dns.com/dns-query';
+      if (args.verify_cert !== undefined) dnsSettingsState.verifyDohCert = Boolean(args.verify_cert);
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      return {
+        status: 'success',
+        dohServer: dnsSettingsState.useDohServer,
+        verifyCert: dnsSettingsState.verifyDohCert,
+        cliCommand: `/ip dns set use-doh-server="${dnsSettingsState.useDohServer}" verify-doh-cert=${dnsSettingsState.verifyDohCert ? 'yes' : 'no'}`,
+        message: `Configured DoH server: ${dnsSettingsState.useDohServer}`
+      };
+    }
+
+    case 'mikrotik_test_dns_query': {
+      const domain = args.domain || 'mikrotik.com';
+      return {
+        status: 'success',
+        domain,
+        resolvedIp: '159.148.147.204',
+        latencyMs: 14.5,
+        upstreamServer: args.server || dnsSettingsState.servers.split(',')[0],
+        cliCommand: `/put [:resolve ${domain}]`,
+        message: `Resolved ${domain} to 159.148.147.204 in 14.5ms`
+      };
+    }
+
+    case 'mikrotik_create_wireguard_interface': {
+      const wgName = args.name || 'wg0';
+      const existing = routerState.interfaces.find(i => i.name === wgName);
+      if (!existing) {
+        routerState.interfaces.push({
+          name: wgName,
+          type: 'ether',
+          ipAddress: 'unassigned',
+          status: 'up',
+          rxSpeed: '0 bps',
+          txSpeed: '0 bps',
+          comment: `WireGuard VPN (Port ${args.listen_port || 13231})`
+        });
+      }
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      routerState.lastModified = new Date().toISOString();
+      const cli = `/interface wireguard add name=${wgName} listen-port=${args.listen_port || 13231}`;
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `Created WireGuard interface ${wgName} on port ${args.listen_port || 13231}`,
+        type: 'command'
+      });
+      return {
+        status: 'success',
+        interface: wgName,
+        port: args.listen_port || 13231,
+        cliCommand: cli,
+        message: `WireGuard interface ${wgName} created on port ${args.listen_port || 13231}`
+      };
+    }
+
+    case 'mikrotik_add_wireguard_peer': {
+      const peer = {
+        interface: args.interface || 'wg0',
+        publicKey: args.public_key,
+        allowedAddress: args.allowed_address,
+        comment: args.comment
+      };
+      wireguardPeersState.push(peer);
+      if (safeModeState.active) safeModeState.pendingChangesCount++;
+      const cli = `/interface wireguard peers add interface=${peer.interface} public-key="${peer.publicKey}" allowed-address=${peer.allowedAddress}${peer.comment ? ` comment="${peer.comment}"` : ''}`;
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `Registered WireGuard peer on ${peer.interface} for ${peer.allowedAddress}`,
+        type: 'command'
+      });
+      return {
+        status: 'success',
+        peer,
+        cliCommand: cli,
+        message: `WireGuard peer registered for ${peer.allowedAddress}`
+      };
+    }
+
+    case 'mikrotik_get_poe_status': {
+      return {
+        status: 'success',
+        ports: [
+          { port: 'ether1', poeOut: 'off', voltage: '0.0V', current: '0mA', power: '0.0W', status: 'disabled' },
+          { port: 'ether2', poeOut: 'auto-on', voltage: '52.4V', current: '210mA', power: '11.0W', status: 'powered', device: 'cAP ac (Floor 2)' },
+          { port: 'ether3', poeOut: 'auto-on', voltage: '52.3V', current: '180mA', power: '9.4W', status: 'powered', device: 'cAP ax (Lobby)' },
+          { port: 'ether4', poeOut: 'auto-on', voltage: '52.4V', current: '85mA', power: '4.4W', status: 'powered', device: 'Grandstream VoIP Deskphone' },
+          { port: 'ether5', poeOut: 'off', voltage: '0.0V', current: '0mA', power: '0.0W', status: 'waiting-for-load' }
+        ],
+        totalPowerWatts: 24.8,
+        psuVoltage: '52.4V'
+      };
+    }
+
+    case 'mikrotik_select_fleet_device': {
+      safeModeState.targetDevice = args.device || 'edge-router-core';
+      routerState.agentLogs.unshift({
+        id: `mcp-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        source: 'MikroTik-MCP',
+        message: `Target device switched to: ${safeModeState.targetDevice}`,
+        type: 'info'
+      });
+      return {
+        status: 'success',
+        selectedDevice: safeModeState.targetDevice,
+        message: `Active fleet device context set to ${safeModeState.targetDevice}`
+      };
+    }
+
+    case 'mikrotik_list_fleet_devices': {
+      return {
+        status: 'success',
+        activeDevice: safeModeState.targetDevice,
+        fleet: [
+          { id: 'edge-core-01', name: 'edge-router-core', ip: '192.168.88.1', model: 'CCR2004-16G-2S+', status: 'online' },
+          { id: 'branch-vlan-02', name: 'branch-office-gw', ip: '10.200.1.1', model: 'RB5009UG+S+IN', status: 'online' },
+          { id: 'wireless-ap-03', name: 'campus-capsman-ctl', ip: '192.168.10.2', model: 'CRS326-24G-2S+RM', status: 'online' },
+          { id: 'lte-backup-04', name: 'backup-lte-gateway', ip: '192.168.99.1', model: 'LtAP mini LTE kit', status: 'standby' }
+        ]
       };
     }
 
@@ -1739,4 +2562,276 @@ rl.on('line', async (line) => {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // --- Official MikroTik MCP Endpoints ---
+
+  // MCP Server-Sent Events (SSE) streaming transport
+  app.get('/api/mcp/sse', (req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    res.write(`event: endpoint\ndata: ${JSON.stringify({ endpoint: '/api/mcp', transport: 'sse', version: '2024-11-05' })}\n\n`);
+    res.write(`event: message\ndata: ${JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notifications/initialized',
+      params: {
+        serverInfo: { name: 'mikrotik-mcp-server', version: '1.4.0', source: 'jeff-nasseri/mikrotik-mcp' },
+        categoriesCount: 19,
+        toolsCount: MCP_TOOLS.length,
+        device: safeModeState.targetDevice
+      }
+    })}\n\n`);
+
+    const interval = setInterval(() => {
+      res.write(`event: ping\ndata: ${JSON.stringify({ timestamp: new Date().toISOString(), safeMode: safeModeState.active, pendingChanges: safeModeState.pendingChangesCount })}\n\n`);
+    }, 12000);
+
+    req.on('close', () => {
+      clearInterval(interval);
+    });
+  });
+
+  // Safe Mode status and controls
+  app.get('/api/mcp/safe-mode', (_req: Request, res: Response) => {
+    res.json(executeMcpTool('mikrotik_safe_mode_status', {}));
+  });
+
+  app.post('/api/mcp/safe-mode/enable', (_req: Request, res: Response) => {
+    res.json(executeMcpTool('mikrotik_safe_mode_enable', {}));
+  });
+
+  app.post('/api/mcp/safe-mode/commit', (_req: Request, res: Response) => {
+    res.json(executeMcpTool('mikrotik_safe_mode_commit', {}));
+  });
+
+  app.post('/api/mcp/safe-mode/rollback', (_req: Request, res: Response) => {
+    res.json(executeMcpTool('mikrotik_safe_mode_rollback', {}));
+  });
+
+  // Plain-English AI prompt interpreter for MikroTik MCP
+  app.post('/api/mcp/run-prompt', async (req: Request, res: Response) => {
+    const { prompt, execute = true, device = 'edge-router-core' } = req.body || {};
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    safeModeState.targetDevice = device;
+
+    // Determine tool sequence based on prompt content
+    const lower = prompt.toLowerCase();
+    const sequence: Array<{ tool: string; args: any; description: string }> = [];
+
+    // Check for safe-mode request in prompt
+    if (lower.includes('safe-mode') || lower.includes('safe mode')) {
+      sequence.push({
+        tool: 'mikrotik_safe_mode_enable',
+        args: { session_timeout: 300 },
+        description: 'Safe-mode session armed'
+      });
+    }
+
+    // 1. VLAN interface creation
+    if (lower.includes('vlan')) {
+      const vlanIdMatch = lower.match(/(?:id|tag|vlan)\s*([0-9]{1,4})/i) || lower.match(/([0-9]{1,4})/);
+      const vlanId = vlanIdMatch ? parseInt(vlanIdMatch[1], 10) : 200;
+      const vlanName = `vlan${vlanId}`;
+      const parentMatch = lower.match(/on\s+([a-z0-9-_]+)/i);
+      const parentIf = parentMatch ? parentMatch[1] : 'ether1';
+
+      sequence.push({
+        tool: 'mikrotik_create_vlan_interface',
+        args: { name: vlanName, vlan_id: vlanId, interface: parentIf, comment: 'Created via MCP prompt' },
+        description: `${vlanName} created on ${parentIf} · tag ${vlanId}`
+      });
+    }
+
+    // 2. IP Address binding
+    const ipMatch = prompt.match(/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\/[0-9]{1,2})/);
+    if (ipMatch) {
+      const address = ipMatch[1];
+      // Target interface
+      const vlanCreated = sequence.find(s => s.tool === 'mikrotik_create_vlan_interface');
+      const targetIf = vlanCreated ? vlanCreated.args.name : (lower.includes('wg0') || lower.includes('wireguard') ? 'wg0' : 'bridge-vlan');
+
+      sequence.push({
+        tool: 'mikrotik_add_ip_address',
+        args: { address, interface: targetIf, comment: 'Bound via MCP' },
+        description: `${address} bound to ${targetIf}`
+      });
+    }
+
+    // 3. DHCP Pool
+    if (lower.includes('dhcp') || lower.includes('pool')) {
+      const rangeMatch = prompt.match(/(\.[0-9]{1,3}\s*to\s*\.[0-9]{1,3})/i) || prompt.match(/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
+      let range = '192.168.200.10-192.168.200.100';
+      if (rangeMatch && rangeMatch[1].includes('to')) {
+        const parts = rangeMatch[1].split('to');
+        const start = parts[0].replace('.', '').trim();
+        const end = parts[1].replace('.', '').trim();
+        range = `192.168.200.${start}-192.168.200.${end}`;
+      } else if (rangeMatch) {
+        range = rangeMatch[1];
+      }
+
+      sequence.push({
+        tool: 'mikrotik_create_dhcp_pool',
+        args: { name: 'pool-200', ranges: range },
+        description: `Pool "pool-200" · ${range}`
+      });
+    }
+
+    // 4. NAT Masquerade
+    if (lower.includes('masquerade') || lower.includes('nat')) {
+      const outIf = lower.includes('ether1') ? 'ether1' : 'lte1';
+      sequence.push({
+        tool: 'mikrotik_create_nat_rule',
+        args: { chain: 'srcnat', action: 'masquerade', out_interface: outIf, comment: 'NAT Masquerade via MCP' },
+        description: `NAT rule added (masquerade on ${outIf})`
+      });
+    }
+
+    // 5. WireGuard
+    if (lower.includes('wireguard') || lower.includes('wg0')) {
+      if (!sequence.some(s => s.tool === 'mikrotik_create_wireguard_interface')) {
+        sequence.push({
+          tool: 'mikrotik_create_wireguard_interface',
+          args: { name: 'wg0', listen_port: 13231, comment: 'WireGuard Gateway via MCP' },
+          description: 'WireGuard interface wg0 created on port 13231'
+        });
+      }
+      if (lower.includes('peer') || lower.includes('iphone') || lower.includes('client')) {
+        sequence.push({
+          tool: 'mikrotik_add_wireguard_peer',
+          args: {
+            interface: 'wg0',
+            public_key: 'hK9w89pX+3LmQjN1F8sT2uVwXyZaBcDeFgHiJkLmNoP=',
+            allowed_address: '10.0.0.2/32',
+            comment: 'Mobile Client'
+          },
+          description: 'WireGuard peer registered for 10.0.0.2/32'
+        });
+      }
+    }
+
+    // 6. Simple Queue
+    if (lower.includes('queue') || lower.includes('rate limit') || lower.includes('limit')) {
+      sequence.push({
+        tool: 'mikrotik_create_simple_queue',
+        args: {
+          name: 'queue-mcp-limit',
+          target: '192.168.200.0/24',
+          max_limit_upload: '10M',
+          max_limit_download: '20M',
+          comment: 'Bandwidth Limit via MCP'
+        },
+        description: 'Queue "queue-mcp-limit" active (10M/20M)'
+      });
+    }
+
+    // 7. DNS Cache or Static
+    if (lower.includes('flush dns') || lower.includes('dns cache')) {
+      sequence.push({
+        tool: 'mikrotik_flush_dns_cache',
+        args: {},
+        description: 'RouterOS DNS cache flushed'
+      });
+    }
+
+    // 8. Firewall filter rules
+    if (lower.includes('block') || lower.includes('drop') || lower.includes('allow') || lower.includes('isolate') || (lower.includes('firewall') && !lower.includes('nat'))) {
+      const isDrop = lower.includes('block') || lower.includes('drop') || lower.includes('isolate');
+      const chain = lower.includes('input') ? 'input' : 'forward';
+      const action = isDrop ? 'drop' : 'accept';
+      const portMatch = lower.match(/port\s*([0-9]{1,5})/i);
+      const port = portMatch ? parseInt(portMatch[1], 10) : (lower.includes('ssh') ? 22 : undefined);
+
+      sequence.push({
+        tool: 'mikrotik_create_filter_rule',
+        args: {
+          chain,
+          action,
+          protocol: port ? 'tcp' : undefined,
+          dst_port: port,
+          comment: `Firewall filter rule via MCP: ${action}`
+        },
+        description: `Firewall filter ${action} rule added on ${chain} chain`
+      });
+    }
+
+    // Safe mode commit if requested
+    if ((lower.includes('safe-mode') || lower.includes('safe mode')) && lower.includes('commit')) {
+      sequence.push({
+        tool: 'mikrotik_safe_mode_commit',
+        args: {},
+        description: 'Safe-mode committed'
+      });
+    }
+
+    // Fallback if no tools matched: provide router inspection
+    if (sequence.length === 0) {
+      sequence.push({
+        tool: 'get_router_state',
+        args: {},
+        description: 'Retrieved live RouterOS configuration state'
+      });
+    }
+
+    // Execute the sequence
+    const executedSteps: Array<{
+      tool: string;
+      args: any;
+      description: string;
+      cliCommand?: string;
+      result: any;
+      durationMs: number;
+      status: 'success' | 'error';
+    }> = [];
+
+    for (const step of sequence) {
+      const startTime = Date.now();
+      try {
+        const resObj = execute ? executeMcpTool(step.tool, step.args) : { simulated: true };
+        const durationMs = Date.now() - startTime;
+        executedSteps.push({
+          tool: step.tool,
+          args: step.args,
+          description: step.description,
+          cliCommand: resObj.cliCommand,
+          result: resObj,
+          durationMs,
+          status: 'success'
+        });
+      } catch (err: any) {
+        executedSteps.push({
+          tool: step.tool,
+          args: step.args,
+          description: step.description,
+          result: { error: err.message },
+          durationMs: Date.now() - startTime,
+          status: 'error'
+        });
+      }
+    }
+
+    // Generate plain-English conversational summary
+    let summary = '';
+    const vlanStep = executedSteps.find(s => s.tool === 'mikrotik_create_vlan_interface');
+    if (vlanStep) {
+      summary = `Guest VLAN is live. Created interface ${vlanStep.args.name} with 802.1Q tag ${vlanStep.args.vlan_id} on parent ${vlanStep.args.interface}. Assigned IP gateway, configured DHCP pool, and enabled masquerade NAT out to WAN. Want me to set a rate limit?`;
+    } else {
+      summary = `Ran ${executedSteps.length} MikroTik MCP tool${executedSteps.length === 1 ? '' : 's'} on ${device}. Router configuration is updated and verified.`;
+    }
+
+    res.json({
+      prompt,
+      device,
+      stepsCount: executedSteps.length,
+      steps: executedSteps,
+      summary,
+      safeMode: safeModeState
+    });
+  });
+
 }

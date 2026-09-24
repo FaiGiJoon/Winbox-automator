@@ -39,6 +39,8 @@ export interface FirewallFilterRule {
   dstPort?: number;
   comment?: string;
   disabled?: boolean;
+  packets?: number;
+  bytes?: number;
 }
 
 export interface RouterOSCommand {

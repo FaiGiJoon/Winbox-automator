@@ -33,6 +33,7 @@ import {
   Lock,
   Laptop,
   Download,
+  FileSpreadsheet,
   FileCode,
   Edit2,
   Check,
@@ -40,7 +41,9 @@ import {
   Bot,
   Power,
   Search,
-  Filter
+  Filter,
+  RotateCcw,
+  Workflow
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -69,12 +72,33 @@ import HardwareStressTest from './components/HardwareStressTest';
 import PacketSniffer from './components/PacketSniffer';
 import NetworkScannerAgentPlatform from './components/NetworkScannerAgentPlatform';
 import HermesAgentConnector from './components/HermesAgentConnector';
+import MikroTikMcpConsole from './components/MikroTikMcpConsole';
+import Winbox44Suite, { WinboxTheme } from './components/Winbox44Suite';
 
 export default function App() {
+  // WinBox 4.4 Update Feature States
+  const [theme, setTheme] = useState<WinboxTheme>('dark');
+  const [scrollbackSize, setScrollbackSize] = useState<number>(2000);
+  const [confirmDeletions, setConfirmDeletions] = useState<boolean>(true);
+  const [optOutSession, setOptOutSession] = useState<boolean>(false);
+  const [pendingDeleteModal, setPendingDeleteModal] = useState<{ label: string; action: () => void } | null>(null);
+  const [isSubmittingForm, setIsSubmittingForm] = useState<boolean>(false);
+  const [isActionDebouncing, setIsActionDebouncing] = useState<boolean>(false);
+  const [isLogHovered, setIsLogHovered] = useState<boolean>(false);
+
+  // Universal WinBox 4.4 Delete with Confirmation and Session Opt-Out
+  const confirmAndDelete = (label: string, action: () => void) => {
+    if (!confirmDeletions || optOutSession) {
+      action();
+    } else {
+      setPendingDeleteModal({ label, action });
+    }
+  };
+
   // Navigation Menu tabs
   const [activeTab, setActiveTab] = useState<
-    'terminal' | 'hermes' | 'topology' | 'capsman' | 'stp' | 'dhcp' | 'wireguard' | 'mangle' | 'interfaces' | 'ips' | 'nat' | 'filters' | 'simulator' | 'settings' | 'local-adapters' | 'stresstest' | 'packetsniffer' | 'netscanner'
-  >('terminal');
+    'terminal' | 'hermes' | 'mikrotik-mcp' | 'topology' | 'capsman' | 'stp' | 'dhcp' | 'wireguard' | 'mangle' | 'interfaces' | 'ips' | 'nat' | 'filters' | 'simulator' | 'settings' | 'local-adapters' | 'stresstest' | 'packetsniffer' | 'netscanner'
+  >('mikrotik-mcp');
 
   // Router Engine Simulated State - Prefilled with the user's modern RouterOS configuration!
   const [interfaces, setInterfaces] = useState<InterfaceState[]>([
@@ -96,10 +120,10 @@ export default function App() {
   ]);
 
   const [filterRules, setFilterRules] = useState<FirewallFilterRule[]>([
-    { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway', disabled: false },
-    { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward', disabled: false },
-    { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)', disabled: false },
-    { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports', disabled: false }
+    { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway', disabled: false, packets: 1420, bytes: 119280 },
+    { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward', disabled: false, packets: 58940, bytes: 48920140 },
+    { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)', disabled: false, packets: 348, bytes: 29232 },
+    { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports', disabled: false, packets: 112, bytes: 9408 }
   ]);
 
   const [logs, setLogs] = useState<LogEntry[]>([
@@ -245,6 +269,87 @@ export default function App() {
 
     return () => clearInterval(timer);
   }, [activeSpike, selectedInterface, isTrafficPaused]);
+
+  // Track rules that recently processed packets for animated visual feedback
+  const [activeTrafficRuleIds, setActiveTrafficRuleIds] = useState<Record<string, number>>({});
+
+  // Byte formatting utility for RouterOS firewall counters
+  const formatByteCount = (bytes: number = 0): string => {
+    if (bytes >= 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+    if (bytes >= 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+    if (bytes >= 1024) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+    return `${bytes} B`;
+  };
+
+  // Mock active traffic counters: updates every 2.5 seconds to simulate dynamic packet flow
+  useEffect(() => {
+    if (isTrafficPaused) return;
+
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const activeIds: Record<string, number> = {};
+
+      setFilterRules(prev => {
+        let changed = false;
+        const updated = prev.map(rule => {
+          // Disabled/inactive rules in RouterOS do not evaluate or increment counters
+          if (rule.disabled) {
+            return rule;
+          }
+
+          let packetDelta = 0;
+          let bytesPerPacket = 750;
+
+          if (rule.chain === 'forward' && rule.action === 'accept') {
+            // High throughput forward traffic (e.g. HTTPS port 443 web data)
+            packetDelta = Math.floor(18 + Math.random() * 42);
+            bytesPerPacket = Math.floor(820 + Math.random() * 640);
+          } else if (rule.chain === 'input' && rule.action === 'accept') {
+            // Gateway management & ping responses (ICMP, DNS, NTP)
+            packetDelta = Math.floor(1 + Math.random() * 4);
+            bytesPerPacket = Math.floor(64 + Math.random() * 96);
+          } else if (rule.action === 'drop' || rule.action === 'reject') {
+            // Drop filters catch occasional broadcast scans or unauthorized guest attempts
+            if (Math.random() < 0.4) {
+              packetDelta = Math.floor(1 + Math.random() * 3);
+              bytesPerPacket = Math.floor(54 + Math.random() * 74);
+            }
+          } else {
+            // General filter rules
+            packetDelta = Math.floor(3 + Math.random() * 10);
+            bytesPerPacket = Math.floor(320 + Math.random() * 450);
+          }
+
+          if (packetDelta > 0) {
+            changed = true;
+            activeIds[rule.id] = now;
+            const byteDelta = packetDelta * bytesPerPacket;
+            return {
+              ...rule,
+              packets: (rule.packets || 0) + packetDelta,
+              bytes: (rule.bytes || 0) + byteDelta
+            };
+          }
+
+          return rule;
+        });
+
+        if (Object.keys(activeIds).length > 0) {
+          setActiveTrafficRuleIds(prevActive => ({ ...prevActive, ...activeIds }));
+        }
+
+        return changed ? updated : prev;
+      });
+    }, 2500);
+
+    return () => clearInterval(timer);
+  }, [isTrafficPaused]);
 
   const getLatestRxTxText = (name: string) => {
     const points = trafficHistory[name];
@@ -479,6 +584,108 @@ export default function App() {
     addLog('System', `Exported RouterOS config script to file: ${filename}`, 'info');
   };
 
+  // Export current Firewall Filter rule set as a structured RFC-4180 CSV for auditing
+  const exportFilterRulesToCsv = () => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `Firewall_Filter_Rules_${timestamp}.csv`;
+
+    const escapeCsv = (val: any) => {
+      if (val === undefined || val === null) return '""';
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return `"${str}"`;
+    };
+
+    const headers = [
+      'Priority (#)',
+      'Rule ID',
+      'Chain',
+      'Action',
+      'Protocol',
+      'Source Address',
+      'Destination Address',
+      'Destination Port',
+      'Status',
+      'Packets Processed',
+      'Bytes Processed',
+      'Throughput Rate',
+      'Comment / Label'
+    ];
+
+    const rows = filterRules.map((rule, idx) => [
+      idx + 1,
+      rule.id,
+      rule.chain,
+      rule.action,
+      rule.protocol || 'any',
+      rule.srcAddress || 'any',
+      rule.dstAddress || 'any',
+      rule.dstPort !== undefined ? rule.dstPort : 'any',
+      rule.disabled ? 'Disabled' : 'Active (Enabled)',
+      rule.packets || 0,
+      rule.bytes || 0,
+      rule.rate || '0 bps',
+      rule.comment || ''
+    ]);
+
+    const csvContent = [
+      headers.map(escapeCsv).join(','),
+      ...rows.map(row => row.map(escapeCsv).join(','))
+    ].join('\r\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    addLog('Firewall', `Exported ${filterRules.length} firewall filter rules to CSV (${filename}) for security auditing.`, 'info');
+  };
+
+  // Export current Firewall Filter rule set as RouterOS .rsc script
+  const exportFilterRulesToRsc = () => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `Firewall_Filter_Rules_${timestamp}.rsc`;
+
+    let content = `# ====================================================================\n`;
+    content += `# RouterOS Firewall Filter Export Script (.rsc)\n`;
+    content += `# Generated on: ${new Date().toISOString()}\n`;
+    content += `# Total Filter Rules: ${filterRules.length}\n`;
+    content += `# ====================================================================\n\n`;
+    content += `/ip firewall filter\n`;
+
+    filterRules.forEach((filter) => {
+      let cmd = `add chain="${filter.chain}" action="${filter.action}"`;
+      if (filter.disabled) cmd += ` disabled=yes`;
+      if (filter.protocol && filter.protocol !== 'any') cmd += ` protocol="${filter.protocol.toLowerCase()}"`;
+      if (filter.srcAddress) cmd += ` src-address="${filter.srcAddress}"`;
+      if (filter.dstAddress) cmd += ` dst-address="${filter.dstAddress}"`;
+      if (filter.dstPort) cmd += ` dst-port=${filter.dstPort}`;
+      if (filter.comment) cmd += ` comment="${filter.comment}"`;
+      content += `${cmd}\n`;
+    });
+
+    content += `\n# End of Firewall Filter Script\n`;
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    addLog('Firewall', `Exported ${filterRules.length} firewall filter rules to RouterOS script: ${filename}`, 'info');
+  };
+
   const deleteIp = (id: string) => {
     setIps(prev => prev.filter(ip => ip.id !== id));
     addLog('WinBox', `Deleted IP registration ID: ${id}`, 'info');
@@ -525,6 +732,8 @@ export default function App() {
       const matchesComment = rule.comment?.toLowerCase().includes(q);
       const matchesPort = rule.dstPort?.toString().includes(q);
       const matchesStatus = (rule.disabled ? 'disabled inactive' : 'enabled active').includes(q);
+      const matchesPackets = rule.packets?.toString().includes(q);
+      const matchesBytes = rule.bytes?.toString().includes(q);
       return Boolean(
         matchesChain ||
         matchesAction ||
@@ -533,11 +742,17 @@ export default function App() {
         matchesDst ||
         matchesComment ||
         matchesPort ||
-        matchesStatus
+        matchesStatus ||
+        matchesPackets ||
+        matchesBytes
       );
     }
     return true;
   });
+
+  // Calculate aggregate traffic processed across all filter rules
+  const totalFilterPackets = filterRules.reduce((sum, r) => sum + (r.packets || 0), 0);
+  const totalFilterBytes = filterRules.reduce((sum, r) => sum + (r.bytes || 0), 0);
 
   // Check if all visible rules are selected
   const isAllVisibleSelected = visibleFilterRules.length > 0 && visibleFilterRules.every(r => selectedFilterRuleIds.includes(r.id));
@@ -669,12 +884,27 @@ export default function App() {
     setEditingRuleCommentText('');
   };
 
+  // Reset traffic counters (packets & bytes) for selected or all firewall filter rules
+  const resetRuleCounters = (ruleId?: string) => {
+    if (ruleId) {
+      setFilterRules(prev => prev.map(r => r.id === ruleId ? { ...r, packets: 0, bytes: 0 } : r));
+      addLog('WinBox', `Reset traffic counters for Firewall Filter rule #${ruleId}`, 'info');
+    } else if (selectedFilterRuleIds.length > 0) {
+      const count = selectedFilterRuleIds.length;
+      setFilterRules(prev => prev.map(r => selectedFilterRuleIds.includes(r.id) ? { ...r, packets: 0, bytes: 0 } : r));
+      addLog('WinBox', `Reset traffic counters for ${count} selected Firewall Filter rule${count > 1 ? 's' : ''}`, 'info');
+    } else {
+      setFilterRules(prev => prev.map(r => ({ ...r, packets: 0, bytes: 0 })));
+      addLog('WinBox', 'Reset traffic counters for all Firewall Filter rules to 0', 'info');
+    }
+  };
+
   const resetDefaultFilterRules = () => {
     const defaults: FirewallFilterRule[] = [
-      { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway', disabled: false },
-      { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward', disabled: false },
-      { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)', disabled: false },
-      { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports', disabled: false }
+      { id: 'f1', chain: 'input', action: 'accept', protocol: 'icmp', comment: 'Allow ping checks to local gateway', disabled: false, packets: 1420, bytes: 119280 },
+      { id: 'f2', chain: 'forward', action: 'accept', protocol: 'tcp', dstPort: 443, comment: 'Permit standard encrypted HTTPS traffic forward', disabled: false, packets: 58940, bytes: 48920140 },
+      { id: 'f3', chain: 'forward', action: 'drop', srcAddress: '192.168.20.0/24', dstAddress: '192.168.10.0/24', comment: 'Firewall drop list: Isolate Guest Subnet (VLAN 20) from Main (VLAN 10)', disabled: false, packets: 348, bytes: 29232 },
+      { id: 'f4', chain: 'input', action: 'drop', srcAddress: '192.168.20.0/24', comment: 'Firewall drop list: Prevent Guest VLAN from reaching local WinBox management ports', disabled: false, packets: 112, bytes: 9408 }
     ];
     setFilterRules(defaults);
     setSelectedFilterRuleIds([]);
@@ -683,7 +913,10 @@ export default function App() {
 
   const addManualIp = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addIpForm.address) return;
+    if (isSubmittingForm || !addIpForm.address) return;
+    setIsSubmittingForm(true);
+    setTimeout(() => setIsSubmittingForm(false), 250);
+
     const newIp: IPAddressConfig = {
       id: Date.now().toString(),
       address: addIpForm.address,
@@ -698,6 +931,10 @@ export default function App() {
 
   const addManualFilter = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingForm) return;
+    setIsSubmittingForm(true);
+    setTimeout(() => setIsSubmittingForm(false), 250);
+
     const newRule: FirewallFilterRule = {
       id: Date.now().toString(),
       chain: addFilterForm.chain as any || 'forward',
@@ -706,7 +943,9 @@ export default function App() {
       srcAddress: addFilterForm.srcAddress?.trim() || undefined,
       dstAddress: addFilterForm.dstAddress?.trim() || undefined,
       comment: addFilterForm.comment || 'Custom user filter',
-      disabled: Boolean(addFilterForm.disabled)
+      disabled: Boolean(addFilterForm.disabled),
+      packets: 0,
+      bytes: 0
     };
     setFilterRules(prev => [...prev, newRule]);
     setAddFilterForm({ chain: 'forward', action: 'drop', protocol: 'any', srcAddress: '', dstAddress: '', comment: '', disabled: false });
@@ -714,6 +953,10 @@ export default function App() {
   };
 
   const triggerPacketSimulation = () => {
+    if (isActionDebouncing) return;
+    setIsActionDebouncing(true);
+    setTimeout(() => setIsActionDebouncing(false), 400);
+
     setSimulationActive(true);
     setSimulationStep(1);
     setSimulationDecision(null);
@@ -798,6 +1041,24 @@ export default function App() {
             break; // Stop evaluating further rules
           }
 
+          if (matchedRuleIndex >= 0) {
+            const matchedId = filterRules[matchedRuleIndex]?.id;
+            if (matchedId) {
+              const packetBytes = simulatorInput.protocol === 'tcp' ? 64 : 84;
+              setFilterRules(rules => rules.map((r, idx) => {
+                if (idx === matchedRuleIndex) {
+                  return {
+                    ...r,
+                    packets: (r.packets || 0) + 1,
+                    bytes: (r.bytes || 0) + packetBytes
+                  };
+                }
+                return r;
+              }));
+              setActiveTrafficRuleIds(prev => ({ ...prev, [matchedId]: Date.now() }));
+            }
+          }
+
           setSimulationDecision(fate);
           const logMsg = `[Step 4] FIREWALL EVALUATION (Rule Priority #${matchedRuleIndex >= 0 ? matchedRuleIndex : 'Default'}): Decision: [${fate.toUpperCase()}]. ${matchReason}`;
           setSimulationLogs(logs => [...logs, logMsg]);
@@ -850,6 +1111,13 @@ export default function App() {
             active={activeTab === 'terminal'} 
             onClick={() => setActiveTab('terminal')} 
             badge="Secure"
+          />
+          <NavItem 
+            icon={<Workflow size={16} className="text-emerald-400" />} 
+            label="MikroTik MCP Server" 
+            active={activeTab === 'mikrotik-mcp'} 
+            onClick={() => setActiveTab('mikrotik-mcp')} 
+            badge="19 Cats"
           />
           <NavItem 
             icon={<Bot size={16} className="text-cyan-400" />} 
@@ -988,15 +1256,35 @@ export default function App() {
       </div>
 
       {/* Main Workspace */}
-      <main className="pl-64 min-h-screen bg-[#070709] flex flex-col">
+      <main className="pl-64 min-h-screen bg-[#070709] flex flex-col pb-12">
         {/* Top bar */}
         <header className="h-14 border-b border-[#12121c] bg-[#0a0a0d] flex items-center justify-between px-8 z-40">
           <div className="flex items-center gap-3">
             <span className="text-zinc-500 text-xs font-mono">Device Target IP: <span className="text-cyan-400 font-bold">192.168.88.1</span></span>
             <span className="h-4 w-[1px] bg-[#1a1a24]" />
-            <span className="text-xs text-zinc-400 font-mono">WinBox Alternative Edition v4.0.5</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-200 font-mono font-bold">WinBox 4.4</span>
+              <span className="text-[10px] bg-cyan-500/15 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-500/30 font-mono font-bold">
+                2026-09-14
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-3">
+            {/* WinBox 4.4 Auto/Dark/Light Theme Selector */}
+            <div className="flex items-center gap-1 bg-[#10101b] border border-[#19192c] rounded-lg p-1 text-xs">
+              {(['auto', 'dark', 'light'] as WinboxTheme[]).map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTheme(t)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono capitalize transition-colors cursor-pointer ${
+                    theme === t ? 'bg-cyan-600 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                  title={`WinBox 4.4 Theme: ${t} (Auto follows OS light/dark)`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#10101b] border border-[#19192c] text-xs">
               <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
               <span className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider">{providerSettings.provider} Direct-Connect Active</span>
@@ -1168,6 +1456,21 @@ export default function App() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* TAB: MIKROTIK MCP SERVER (JEFF-NASSERI/MIKROTIK-MCP) */}
+          {activeTab === 'mikrotik-mcp' && (
+            <MikroTikMcpConsole
+              filterRules={filterRules}
+              setFilterRules={setFilterRules}
+              ips={ips}
+              setIps={setIps}
+              interfaces={interfaces}
+              setInterfaces={setInterfaces}
+              natRules={natRules}
+              setNatRules={setNatRules}
+              addLog={addLog}
+            />
           )}
 
           {/* TAB: HERMES AGENT & OPENCLAW CONNECTOR */}
@@ -1345,7 +1648,17 @@ export default function App() {
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
                 {/* Form */}
                 <div className="xl:col-span-4 bg-[#0a0a0f] border border-[#141422] p-5 rounded-2xl space-y-4 h-fit">
-                  <h3 className="text-xs font-bold text-white uppercase tracking-wider block border-b border-zinc-900 pb-2">Assign IP Address</h3>
+                  <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider block">Assign IP Address</h3>
+                    <button 
+                      type="button" 
+                      onClick={() => setAddIpForm({ address: '', interface: 'vlan10-main', comment: '' })}
+                      className="text-[10px] text-zinc-500 hover:text-cyan-400 font-mono transition-colors cursor-pointer"
+                      title="Reset configuration for this object (WinBox 4.4)"
+                    >
+                      Reset Config
+                    </button>
+                  </div>
                   <form onSubmit={addManualIp} className="space-y-4">
                     <div className="space-y-1">
                       <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">IP Address/Mask</label>
@@ -1385,9 +1698,10 @@ export default function App() {
 
                     <button 
                       type="submit"
-                      className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs py-3 rounded-xl transition-colors shadow-lg shadow-cyan-900/10 cursor-pointer"
+                      disabled={isSubmittingForm}
+                      className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl transition-colors shadow-lg shadow-cyan-900/10 cursor-pointer"
                     >
-                      Apply IP Reservation
+                      {isSubmittingForm ? 'Applying...' : 'Apply IP Reservation'}
                     </button>
                   </form>
                 </div>
@@ -1414,8 +1728,9 @@ export default function App() {
                             <td className="py-3.5 text-zinc-400 italic text-[11px]">{ip.comment}</td>
                             <td className="py-3.5 text-right">
                               <button 
-                                onClick={() => deleteIp(ip.id)}
+                                onClick={() => confirmAndDelete(`IP Address ${ip.address}`, () => deleteIp(ip.id))}
                                 className="p-1 text-zinc-600 hover:text-red-400 transition-colors cursor-pointer"
+                                title="Delete IP address (prompts confirmation with opt-out)"
                               >
                                 <Trash2 size={13} />
                               </button>
@@ -1468,8 +1783,9 @@ export default function App() {
                           <td className="py-3.5 text-zinc-400 italic text-[11px]">{nat.comment}</td>
                           <td className="py-3.5 text-right">
                             <button 
-                              onClick={() => deleteNat(nat.id)}
+                              onClick={() => confirmAndDelete(`NAT Rule #${nat.id} [${nat.chain} -> ${nat.action}]`, () => deleteNat(nat.id))}
                               className="p-1 text-zinc-600 hover:text-red-400 transition-colors cursor-pointer"
+                              title="Delete NAT rule (prompts confirmation with opt-out)"
                             >
                               <Trash2 size={13} />
                             </button>
@@ -1486,20 +1802,52 @@ export default function App() {
           {/* TAB 11: FIREWALL FILTERS */}
           {activeTab === 'filters' && (
             <div className="space-y-6">
-              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl">
-                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                  <Shield className="text-red-500 w-5 h-5" />
-                  Firewall Filter Rules Table
-                </h2>
-                <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
-                  Enforces boundary packet rejection and drop parameters. Protects sensitive VLAN corporate pathways from untrusted guests.
-                </p>
+              <div className="bg-[#0b0b10] border border-[#141424] p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    <Shield className="text-red-500 w-5 h-5" />
+                    Firewall Filter Rules Table
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1 max-w-3xl leading-relaxed">
+                    Enforces boundary packet rejection and drop parameters. Protects sensitive VLAN corporate pathways from untrusted guests.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={exportFilterRulesToRsc}
+                    className="px-3.5 py-2 text-xs font-bold rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-700/80 hover:border-cyan-500/80 transition-all flex items-center gap-2 cursor-pointer shadow-sm active:scale-95"
+                    title="Export firewall filter rules to RouterOS script (.rsc) file"
+                  >
+                    <Download size={14} className="text-cyan-400" />
+                    <span>Export .rsc</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exportFilterRulesToCsv}
+                    className="px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/80 hover:border-emerald-500 transition-all flex items-center gap-2 cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.15)] active:scale-95"
+                    title="Export current firewall rule set as a structured CSV file for auditing purposes"
+                  >
+                    <FileSpreadsheet size={14} className="text-emerald-400" />
+                    <span>Export to CSV</span>
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
                 {/* Form */}
                 <div className="xl:col-span-4 bg-[#0a0a0f] border border-[#141422] p-5 rounded-2xl h-fit space-y-4">
-                  <h3 className="text-xs font-bold text-white uppercase tracking-wider block border-b border-zinc-900 pb-2">Add Filter Rule</h3>
+                  <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider block">Add Filter Rule</h3>
+                    <button 
+                      type="button" 
+                      onClick={() => setAddFilterForm({ chain: 'forward', action: 'drop', protocol: 'any', srcAddress: '', dstAddress: '', comment: '', disabled: false })}
+                      className="text-[10px] text-zinc-500 hover:text-cyan-400 font-mono transition-colors cursor-pointer"
+                      title="Reset configuration for this object (WinBox 4.4)"
+                    >
+                      Reset Config
+                    </button>
+                  </div>
                   <form onSubmit={addManualFilter} className="space-y-4">
                     <div className="space-y-1">
                       <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Chain</label>
@@ -1606,9 +1954,10 @@ export default function App() {
 
                     <button 
                       type="submit"
-                      className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs py-3 rounded-xl transition-colors shadow-lg shadow-cyan-900/10 cursor-pointer"
+                      disabled={isSubmittingForm}
+                      className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl transition-colors shadow-lg shadow-cyan-900/10 cursor-pointer"
                     >
-                      Apply Filter Rule
+                      {isSubmittingForm ? 'Applying...' : 'Apply Filter Rule'}
                     </button>
                   </form>
                 </div>
@@ -1681,7 +2030,7 @@ export default function App() {
                         {/* Delete Selected Button */}
                         <button
                           type="button"
-                          onClick={deleteSelectedFilterRules}
+                          onClick={() => confirmAndDelete(`${selectedFilterRuleIds.length} selected Firewall Filter rule${selectedFilterRuleIds.length > 1 ? 's' : ''}`, () => deleteSelectedFilterRules())}
                           disabled={selectedFilterRuleIds.length === 0}
                           className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
                             selectedFilterRuleIds.length > 0
@@ -1690,7 +2039,7 @@ export default function App() {
                           }`}
                           title={
                             selectedFilterRuleIds.length > 0
-                              ? `Delete ${selectedFilterRuleIds.length} selected rule${selectedFilterRuleIds.length > 1 ? 's' : ''}`
+                              ? `Delete ${selectedFilterRuleIds.length} selected rule${selectedFilterRuleIds.length > 1 ? 's' : ''} (prompts confirmation)`
                               : 'Select rules using checkboxes to delete'
                           }
                         >
@@ -1703,6 +2052,22 @@ export default function App() {
                           )}
                         </button>
 
+                        {/* Reset Traffic Counters Button */}
+                        <button
+                          type="button"
+                          id="firewall-reset-counters-toolbar-btn"
+                          onClick={() => resetRuleCounters()}
+                          className="px-2.5 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-cyan-300 transition-all cursor-pointer active:scale-95"
+                          title={
+                            selectedFilterRuleIds.length > 0
+                              ? `Reset packet and byte traffic counters for ${selectedFilterRuleIds.length} selected rule${selectedFilterRuleIds.length > 1 ? 's' : ''}`
+                              : "Reset packet and byte traffic counters for all firewall rules to zero"
+                          }
+                        >
+                          <RotateCcw size={13} className="text-cyan-400" />
+                          <span>Reset Counters{selectedFilterRuleIds.length > 0 ? ` (${selectedFilterRuleIds.length})` : ''}</span>
+                        </button>
+
                         <button
                           type="button"
                           onClick={resetDefaultFilterRules}
@@ -1711,6 +2076,32 @@ export default function App() {
                         >
                           Reset Defaults
                         </button>
+
+                        {/* Export .rsc script button */}
+                        <button
+                          type="button"
+                          onClick={exportFilterRulesToRsc}
+                          className="px-2.5 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/80 text-zinc-300 hover:text-cyan-400 transition-all cursor-pointer active:scale-95 shadow-sm"
+                          title="Export firewall filter rules to RouterOS script (.rsc) format"
+                        >
+                          <Download size={13} className="text-cyan-400" />
+                          <span>Export .rsc</span>
+                        </button>
+
+                        {/* Export to CSV Button */}
+                        <button
+                          type="button"
+                          onClick={exportFilterRulesToCsv}
+                          className="px-2.5 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-700/80 text-emerald-300 hover:text-emerald-200 transition-all cursor-pointer active:scale-95 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                          title="Export current firewall rule set as a structured CSV file for auditing purposes"
+                        >
+                          <FileSpreadsheet size={13} className="text-emerald-400" />
+                          <span>Export to CSV</span>
+                        </button>
+                        <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-800/50 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-[0_0_10px_rgba(16,185,129,0.1)]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          Live Counters Active
+                        </span>
                         <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-800/50 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-[0_0_10px_rgba(6,182,212,0.1)]">
                           <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                           Top First-Match
@@ -1770,16 +2161,17 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Right: Search Input + Clear Button */}
+                      {/* Right: Search Input + Clear Button (WinBox 4.4: wider + shortcut info) */}
                       <div className="flex items-center gap-2">
-                        <div className="relative flex-1 sm:w-64">
+                        <div className="relative flex-1 sm:w-80">
                           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
                           <input
                             id="firewall-rule-search-input"
                             type="text"
                             value={filterSearchQuery}
                             onChange={(e) => setFilterSearchQuery(e.target.value)}
-                            placeholder="Search chain, IP, comment, port..."
+                            placeholder="Find (Ctrl+F) [Shift+Click to multi-sort]..."
+                            title="Find filter rules (Ctrl+F) • Tip: Hold Shift and click column headers to multi-sort"
                             aria-label="Search filter rules"
                             className="w-full pl-8 pr-8 py-1.5 bg-zinc-900/90 text-zinc-200 text-xs rounded-lg border border-zinc-800 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 placeholder:text-zinc-600 transition-colors"
                           />
@@ -1856,6 +2248,8 @@ export default function App() {
                             <th className="pb-3">Source IP</th>
                             <th className="pb-3">Destination IP</th>
                             <th className="pb-3">Protocol</th>
+                            <th className="pb-3 px-2 text-right">Packets</th>
+                            <th className="pb-3 px-2 text-right">Bytes</th>
                             <th className="pb-3">Comment / Label</th>
                             <th className="pb-3 pr-2 text-right">Remove</th>
                           </tr>
@@ -2018,6 +2412,49 @@ export default function App() {
                                 {/* Protocol */}
                                 <td className="py-3 font-mono text-zinc-500">{rule.protocol || 'any'}</td>
 
+                                {/* Packets */}
+                                <td className="py-3 px-2 text-right whitespace-nowrap font-mono">
+                                  <div className="flex items-center justify-end gap-1.5" title={`${(rule.packets || 0).toLocaleString()} packets matched by this rule`}>
+                                    {!rule.disabled && (
+                                      <span 
+                                        className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
+                                          activeTrafficRuleIds[rule.id] && (Date.now() - activeTrafficRuleIds[rule.id] < 1500)
+                                            ? 'bg-emerald-400 scale-125 shadow-[0_0_8px_rgba(52,211,153,0.9)]'
+                                            : 'bg-emerald-500/30'
+                                        }`}
+                                        title="Real-time packet monitor active" 
+                                      />
+                                    )}
+                                    <span className={`font-semibold text-xs transition-colors ${
+                                      rule.disabled 
+                                        ? 'text-zinc-600' 
+                                        : activeTrafficRuleIds[rule.id] && (Date.now() - activeTrafficRuleIds[rule.id] < 1500)
+                                        ? 'text-emerald-300'
+                                        : 'text-zinc-200'
+                                    }`}>
+                                      {(rule.packets || 0).toLocaleString()}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                {/* Bytes */}
+                                <td className="py-3 px-2 text-right whitespace-nowrap font-mono">
+                                  <div className="flex flex-col items-end" title={`${(rule.bytes || 0).toLocaleString()} total bytes matched`}>
+                                    <span className={`font-semibold text-xs transition-colors ${
+                                      rule.disabled 
+                                        ? 'text-zinc-600' 
+                                        : activeTrafficRuleIds[rule.id] && (Date.now() - activeTrafficRuleIds[rule.id] < 1500)
+                                        ? 'text-emerald-300'
+                                        : 'text-zinc-200'
+                                    }`}>
+                                      {formatByteCount(rule.bytes || 0)}
+                                    </span>
+                                    <span className="text-[9px] text-zinc-500 font-normal">
+                                      {(rule.bytes || 0).toLocaleString()} B
+                                    </span>
+                                  </div>
+                                </td>
+
                                 {/* Comment / Label */}
                                 <td className="py-2.5 px-2 text-[11px] min-w-[200px] max-w-[320px]">
                                   {editingRuleCommentId === rule.id ? (
@@ -2096,9 +2533,9 @@ export default function App() {
                                 {/* Remove Action */}
                                 <td className="py-3 pr-2 text-right">
                                   <button 
-                                    onClick={() => deleteFilter(rule.id)}
+                                    onClick={() => confirmAndDelete(`Filter Rule #${rule.id} [${rule.chain} ${rule.action}]`, () => deleteFilter(rule.id))}
                                     className="p-1.5 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
-                                    title="Delete rule"
+                                    title="Delete rule (prompts confirmation with opt-out)"
                                   >
                                     <Trash2 size={13} />
                                   </button>
@@ -2108,7 +2545,7 @@ export default function App() {
                           })}
                           {filterRules.length > 0 && visibleFilterRules.length === 0 && (
                             <tr>
-                              <td colSpan={11} className="py-12 text-center text-zinc-500 text-xs">
+                              <td colSpan={13} className="py-12 text-center text-zinc-500 text-xs">
                                 <div className="flex flex-col items-center justify-center gap-2">
                                   <Filter size={20} className="text-zinc-600" />
                                   <span className="text-zinc-400 font-medium">No firewall filter rules match your filter criteria.</span>
@@ -2134,7 +2571,7 @@ export default function App() {
                           )}
                           {filterRules.length === 0 && (
                             <tr>
-                              <td colSpan={11} className="py-12 text-center text-zinc-500 text-xs">
+                              <td colSpan={13} className="py-12 text-center text-zinc-500 text-xs">
                                 <div className="flex flex-col items-center justify-center gap-2">
                                   <Shield size={20} className="text-zinc-600" />
                                   <span>No firewall filter rules configured.</span>
@@ -2156,14 +2593,33 @@ export default function App() {
                   </div>
 
                   {/* Bottom summary bar */}
-                  <div className="mt-4 pt-3 border-t border-zinc-900/80 flex flex-col sm:flex-row items-center justify-between text-[11px] text-zinc-500 font-mono gap-2">
-                    <div className="flex items-center gap-2">
-                      <Shield size={12} className="text-cyan-400" />
-                      <span>RouterOS rule numbering: 0 (highest) to {filterRules.length - 1} (lowest)</span>
+                  <div className="mt-4 pt-3 border-t border-zinc-900/80 flex flex-col sm:flex-row items-center justify-between text-[11px] text-zinc-500 font-mono gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center gap-1.5 text-zinc-400">
+                        <Shield size={12} className="text-cyan-400" />
+                        <span>Rule Priority: 0 (highest) to {filterRules.length - 1} (lowest)</span>
+                      </div>
+                      <span className="text-zinc-800 hidden sm:inline">•</span>
+                      <div className="flex items-center gap-1.5 text-zinc-400">
+                        <Activity size={12} className="text-emerald-400" />
+                        <span>Total Matched:</span>
+                        <span className="text-zinc-200 font-semibold">{totalFilterPackets.toLocaleString()} pkts</span>
+                        <span className="text-zinc-500">({formatByteCount(totalFilterBytes)})</span>
+                      </div>
                     </div>
-                    <span className="text-zinc-600 italic">
-                      Exported in exact priority sequence to .rsc configuration scripts
-                    </span>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-zinc-600 italic">
+                        Counters update every 2.5s
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => resetRuleCounters()}
+                        className="px-2 py-0.5 text-[10px] text-zinc-400 hover:text-cyan-300 hover:bg-zinc-900 rounded border border-zinc-800 transition-colors cursor-pointer"
+                        title="Reset all rule packet and byte counters to zero"
+                      >
+                        Reset All Counters
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2415,6 +2871,89 @@ export default function App() {
           )}
 
         </div>
+
+        {/* WinBox 4.4 Persistent HUD & Feature Suite */}
+        <Winbox44Suite
+          theme={theme}
+          setTheme={setTheme}
+          scrollbackSize={scrollbackSize}
+          setScrollbackSize={setScrollbackSize}
+          onNavigateSection={(sec) => {
+            if (['filters', 'ips', 'nat', 'interfaces', 'terminal', 'mikrotik-mcp', 'stresstest', 'packetsniffer', 'netscanner'].includes(sec)) {
+              setActiveTab(sec as any);
+            }
+          }}
+          confirmDeletions={confirmDeletions}
+          setConfirmDeletions={setConfirmDeletions}
+        />
+
+        {/* Universal WinBox 4.4 Delete Confirmation Modal with Opt-Out */}
+        <AnimatePresence>
+          {pendingDeleteModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-[#0b0b12] border border-[#1b1b2f] rounded-2xl p-6 max-w-md w-full shadow-2xl shadow-red-950/20 space-y-4"
+              >
+                <div className="flex items-center gap-3 text-red-400">
+                  <div className="p-2.5 bg-red-950/50 border border-red-900/50 rounded-xl">
+                    <Trash2 size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Confirm Removal</h3>
+                    <p className="text-[11px] text-zinc-400">WinBox 4.4 Object Deletion Guard</p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-zinc-300 leading-relaxed">
+                  Are you sure you want to remove <strong className="text-white font-mono">{pendingDeleteModal.label}</strong> from configuration?
+                </p>
+
+                <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-900 flex items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    id="winbox-opt-out-confirm"
+                    checked={optOutSession}
+                    onChange={(e) => setOptOutSession(e.target.checked)}
+                    className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 text-cyan-500 accent-cyan-500 cursor-pointer"
+                  />
+                  <label htmlFor="winbox-opt-out-confirm" className="text-[11px] text-zinc-400 cursor-pointer select-none">
+                    Don't ask again this session (Opt-out)
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-900">
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteModal(null)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-white bg-zinc-900 hover:bg-zinc-800 transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const action = pendingDeleteModal.action;
+                      setPendingDeleteModal(null);
+                      action();
+                    }}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-500 transition-colors cursor-pointer flex items-center gap-1.5 shadow-lg shadow-red-950/50"
+                  >
+                    <Trash2 size={13} />
+                    Confirm Remove
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );

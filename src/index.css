@@ -12,19 +12,20 @@
   }
 }
 
-/* Custom scrollbar for terminal */
+/* WinBox 4.4: default scrollbar width/height a few px larger (increased from 6px to 10px) */
 .scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-track {
-  @apply bg-transparent;
+  @apply bg-zinc-950/40;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  @apply bg-zinc-800 rounded-full;
+  @apply bg-zinc-700/80 rounded-full border-2 border-transparent;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  @apply bg-zinc-700;
+  @apply bg-zinc-500;
 }

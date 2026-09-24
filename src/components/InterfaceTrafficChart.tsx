@@ -232,9 +232,9 @@ export default function InterfaceTrafficChart({
       .tickFormat(d => {
         const val = Number(d);
         if (val >= 1000) {
-          return `${(val / 1000).toFixed(1)}G`;
+          return `${(val / 1000).toFixed(1)} Gbps`;
         }
-        return `${val}M`;
+        return `${val.toFixed(1)} Mbps`;
       });
 
     // Style and append axes

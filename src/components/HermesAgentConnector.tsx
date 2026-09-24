@@ -111,7 +111,9 @@ export default function HermesAgentConnector({
             dstAddress: r.dstAddress,
             dstPort: r.dstPort,
             comment: r.comment,
-            disabled: Boolean(r.disabled)
+            disabled: Boolean(r.disabled),
+            packets: r.packets || 0,
+            bytes: r.bytes || 0
           })));
         }
       }
